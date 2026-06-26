@@ -1,5 +1,4 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Navbar from "./components/Navbar";
 import HomePage from "./pages/HomePage";
 import AdminPage from "./pages/AdminPage";
 import ArticlePage from "./pages/ArticlePage";
@@ -9,7 +8,6 @@ const ADMIN_PATH = process.env.REACT_APP_ADMIN_PATH || "/admin";
 export default function App() {
   return (
     <BrowserRouter>
-      <Navbar adminPath={ADMIN_PATH} />
 
       <Routes>
         <Route path="/" element={<HomePage />} />
