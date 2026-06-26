@@ -15,7 +15,7 @@ export default function App() {
         <Route path={ADMIN_PATH} element={<AdminPage />} />
 
         {/* Optional: old /admin redirects to new hidden admin path */}
-        <Route path="/admin" element={<Navigate to={ADMIN_PATH} replace />} />
+        {/* <Route path="/admin" element={<Navigate to={ADMIN_PATH} replace />} /> */}
       </Routes>
     </BrowserRouter>
   );
