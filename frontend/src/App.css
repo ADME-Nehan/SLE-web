@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0d0d0d;
+  --bg2: #141414;
+  --bg3: #1c1c1c;
+  --border: #2a2a2a;
+  --accent: #88c540;
+  --accent-dim: rgba(136,197,64,0.15);
+  --accent-border: rgba(136,197,64,0.3);
+  --text: #f0f0f0;
+  --text2: #888;
+  --text3: #555;
+  --display: 'Playfair Display', Georgia, serif;
+  --body: 'Inter', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--body); font-size: 15px; line-height: 1.6; min-height: 100vh; }
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; font-family: var(--body); }
+input, textarea, select { font-family: var(--body); }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+.container { max-width: 1300px; margin: 0 auto; padding: 0 24px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 500; border: none; transition: all 0.18s; }
+.btn-primary { background: var(--accent); color: #000; font-weight: 600; }
+.btn-primary:hover { background: #9dd94a; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--bg3); color: var(--text); }
+.btn-danger { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+.btn-danger:hover { background: rgba(239,68,68,0.2); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* Category pill */
+.pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.pill-tech { background: rgba(99,102,241,0.15); color: #818cf8; }
+.pill-politics { background: rgba(239,68,68,0.12); color: #f87171; }
+.pill-business { background: rgba(245,158,11,0.12); color: #fbbf24; }
+.pill-sports { background: rgba(16,185,129,0.12); color: #34d399; }
+.pill-entertainment { background: rgba(236,72,153,0.12); color: #f472b6; }
+.pill-science { background: rgba(6,182,212,0.12); color: #22d3ee; }
+.pill-health { background: rgba(16,185,129,0.12); color: #6ee7b7; }
+.pill-world { background: rgba(148,163,184,0.12); color: #94a3b8; }
+.pill-default { background: var(--accent-dim); color: var(--accent); }
+
+/* Form */
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+.form-input { padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; transition: border-color 0.2s; outline: none; }
+.form-input:focus { border-color: var(--accent); }
+.form-input::placeholder { color: var(--text3); }
+
+/* Card */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; transition: border-color 0.2s; }
+.card:hover { border-color: #3a3a3a; }
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.75s linear infinite; }
+
+/* Source badge */
+.source-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; color: var(--text2); transition: border-color 0.2s; }
+.source-badge:hover { border-color: var(--accent); color: var(--accent); }
+.multi-source { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 4px; font-size: 11px; color: var(--accent); font-weight: 600; }
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; z-index: 9999; animation: fadeIn 0.3s ease; max-width: 320px; }
+.toast-success { border-color: var(--accent); color: var(--accent); }
+.toast-error { border-color: #f87171; color: #f87171; }
+
+/* Modal overlay */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
+.modal-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 36px; width: 100%; max-width: 400px; }
