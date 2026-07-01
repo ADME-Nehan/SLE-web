@@ -78,14 +78,7 @@ export default function HomePage() {
     <div style={{ minHeight: "100vh" }}>
       <Navbar onSearch={handleSearch} />
 
-      <main
-        style={{
-          maxWidth: 1100,
-          margin: "0 auto",
-          padding: "28px 20px 48px",
-          boxSizing: "border-box"
-        }}
-      >
+      <main className="home-main">
         {search && (
           <div
             style={{
@@ -138,14 +131,7 @@ export default function HomePage() {
         ) : (
           <div className="fade-in">
             {featured && !search && page === 1 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 320px",
-                  gap: 16,
-                  marginBottom: 18
-                }}
-              >
+              <div className="featured-layout">
                 <NewsCard article={featured} featured />
 
                 <aside
