@@ -3,12 +3,6 @@ const { scrapeNewsSource } = require("./groqService");
 
 /**
  * Category pages to check for every source.
- * Example:
- * If source URL is https://example.com
- * It will also check:
- * https://example.com/sports
- * https://example.com/technology
- * https://example.com/business
  */
 const CATEGORY_SCAN_PAGES = [
   { path: "/", category: "Latest News" },
@@ -30,6 +24,8 @@ const CATEGORY_SCAN_PAGES = [
 
   { path: "/technology", category: "Technology" },
   { path: "/tech", category: "Technology" },
+  { path: "/future", category: "Technology" },
+  { path: "/innovation", category: "Technology" },
   { path: "/technology-news", category: "Technology" },
   { path: "/category/technology", category: "Technology" },
   { path: "/news/technology", category: "Technology" },
@@ -66,7 +62,18 @@ const CATEGORY_SCAN_PAGES = [
 
   { path: "/health", category: "Health" },
   { path: "/science", category: "Science" },
+  { path: "/culture", category: "Entertainment" },
   { path: "/entertainment", category: "Entertainment" }
+];
+
+const BAD_ARTICLE_PATHS = [
+  "/audio",
+  "/video",
+  "/live",
+  "/weather",
+  "/iplayer",
+  "/sounds",
+  "/programmes"
 ];
 
 function cleanString(value) {
@@ -158,6 +165,183 @@ function getSourceHomepage(source) {
   }
 }
 
+function isBadArticleUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+
+    return BAD_ARTICLE_PATHS.some((badPath) => path.includes(badPath));
+  } catch {
+    return false;
+  }
+}
+
+function getCategoryFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+
+    if (path.includes("/sport") || path.includes("/sports")) return "Sports";
+
+    if (
+      path.includes("/technology") ||
+      path.includes("/tech") ||
+      path.includes("/future") ||
+      path.includes("/innovation")
+    ) {
+      return "Technology";
+    }
+
+    if (
+      path.includes("/business") ||
+      path.includes("/worklife") ||
+      path.includes("/capital") ||
+      path.includes("/money")
+    ) {
+      return "Business";
+    }
+
+    if (
+      path.includes("/finance") ||
+      path.includes("/financial") ||
+      path.includes("/market") ||
+      path.includes("/markets")
+    ) {
+      return "Finance";
+    }
+
+    if (path.includes("/economy")) return "Economy";
+    if (path.includes("/investment")) return "Investment";
+    if (path.includes("/politics") || path.includes("/political")) return "Politics";
+    if (path.includes("/world") || path.includes("/international")) return "World";
+    if (path.includes("/health")) return "Health";
+    if (path.includes("/science")) return "Science";
+
+    if (
+      path.includes("/culture") ||
+      path.includes("/entertainment") ||
+      path.includes("/arts")
+    ) {
+      return "Entertainment";
+    }
+
+    if (path.includes("/travel") || path.includes("/tourism")) return "Tourism";
+    if (path.includes("/startup") || path.includes("/startups")) return "Startups";
+    if (path.includes("/export") || path.includes("/exports")) return "Exports";
+
+    if (
+      path.includes("/local") ||
+      path.includes("/sri-lanka") ||
+      path.includes("/srilanka")
+    ) {
+      return "Local News";
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getCategoryFromTitle(title) {
+  const value = normalizeTitle(title);
+
+  if (
+    value.includes("football") ||
+    value.includes("cricket") ||
+    value.includes("match") ||
+    value.includes("fifa") ||
+    value.includes("tennis") ||
+    value.includes("rugby") ||
+    value.includes("goal") ||
+    value.includes("coach") ||
+    value.includes("player")
+  ) {
+    return "Sports";
+  }
+
+  if (
+    value.includes("tech") ||
+    value.includes("technology") ||
+    value.includes("ai") ||
+    value.includes("phone") ||
+    value.includes("device") ||
+    value.includes("software") ||
+    value.includes("app")
+  ) {
+    return "Technology";
+  }
+
+  if (
+    value.includes("business") ||
+    value.includes("company") ||
+    value.includes("market") ||
+    value.includes("economy") ||
+    value.includes("investment")
+  ) {
+    return "Business";
+  }
+
+  if (value.includes("health") || value.includes("hospital")) return "Health";
+  if (value.includes("science") || value.includes("space")) return "Science";
+
+  return null;
+}
+
+function isSpecificCategory(category) {
+  const value = cleanString(category);
+
+  if (!value) return false;
+  if (value === "Latest News") return false;
+
+  return true;
+}
+
+function getFinalCategory(article, scanPage, source) {
+  const articleUrl = article.articleUrl || article.url || article.originalUrl || "";
+
+  const urlCategory =
+    getCategoryFromUrl(articleUrl) ||
+    getCategoryFromUrl(scanPage.url);
+
+  if (urlCategory) return urlCategory;
+
+  const titleCategory = getCategoryFromTitle(article.title || article.headline);
+
+  if (titleCategory) return titleCategory;
+
+  if (isSpecificCategory(scanPage.category)) {
+    return scanPage.category;
+  }
+
+  if (isSpecificCategory(article.category)) {
+    return article.category;
+  }
+
+  if (isSpecificCategory(source.defaultCategory)) {
+    return source.defaultCategory;
+  }
+
+  if (isSpecificCategory(source.category)) {
+    return source.category;
+  }
+
+  return "Latest News";
+}
+
+function shouldReplaceCategory(oldCategory, newCategory) {
+  const oldValue = cleanString(oldCategory);
+  const newValue = cleanString(newCategory);
+
+  if (!newValue || newValue === "Latest News") return false;
+  if (!oldValue || oldValue === "Latest News") return true;
+
+  // This fixes old wrongly saved BBC articles as World
+  if (oldValue === "World" && newValue !== "World") return true;
+
+  return false;
+}
+
 function buildScanPagesForSource(source) {
   const originalSourceUrl = getSourceUrl(source);
 
@@ -188,10 +372,8 @@ function buildScanPagesForSource(source) {
     });
   }
 
-  // First scan the exact URL added by admin
   addPage(originalSourceUrl, source.defaultCategory || "Latest News");
 
-  // Then scan common category URLs
   for (const page of CATEGORY_SCAN_PAGES) {
     try {
       const categoryUrl = new URL(page.path, origin).href;
@@ -217,11 +399,14 @@ function normalizeArticle(article, source, scanPage) {
     ...article,
     title: cleanString(article.title || article.headline),
     summary: cleanString(article.summary || article.description),
-    category:
-      article.category ||
-      scanPage.category ||
-      source.defaultCategory ||
-      "Latest News",
+    category: getFinalCategory(
+      {
+        ...article,
+        articleUrl
+      },
+      scanPage,
+      source
+    ),
     tags: Array.isArray(article.tags) ? article.tags : [],
     sentiment: article.sentiment || null,
     publishedAt: article.publishedAt || null,
@@ -298,6 +483,11 @@ async function saveArticle(article) {
     return null;
   }
 
+  if (isBadArticleUrl(article.articleUrl)) {
+    console.log(`      ⚠️ Skipped non-news URL: ${article.articleUrl}`);
+    return null;
+  }
+
   const existingId = await findExistingArticle(article.articleUrl, article.title);
   const sourceEntry = sourceEntryFromArticle(article);
 
@@ -320,14 +510,21 @@ async function saveArticle(article) {
       );
     });
 
+    const updateData = {
+      updatedAt: new Date().toISOString()
+    };
+
+    if (shouldReplaceCategory(existing.category, article.category)) {
+      updateData.category = article.category;
+      console.log(
+        `      🏷️ Category updated: ${existing.category} → ${article.category}`
+      );
+    }
+
     if (!alreadyHasSource) {
       sources.push(sourceEntry);
-
-      await ref.update({
-        sources,
-        sourceCount: sources.length,
-        updatedAt: new Date().toISOString()
-      });
+      updateData.sources = sources;
+      updateData.sourceCount = sources.length;
 
       console.log(
         `      🔗 Merged source into existing: "${article.title.substring(
@@ -340,6 +537,8 @@ async function saveArticle(article) {
         `      ⏭️ Already exists: "${article.title.substring(0, 60)}"`
       );
     }
+
+    await ref.update(updateData);
 
     return existingId;
   }
@@ -367,7 +566,12 @@ async function saveArticle(article) {
     updatedAt: new Date().toISOString()
   });
 
-  console.log(`      ✅ Saved new article: "${article.title.substring(0, 60)}"`);
+  console.log(
+    `      ✅ [${article.category}] Saved new article: "${article.title.substring(
+      0,
+      60
+    )}"`
+  );
 
   return ref.id;
 }
@@ -388,7 +592,11 @@ async function scrapeSourceFromAllCategoryPages(source) {
   const scanPages = buildScanPagesForSource(source);
 
   const maxArticles = Number(
-    source.maxLinksPerRun || process.env.MAX_LINKS_PER_SOURCE || 30
+    source.maxArticlesPerRun || process.env.MAX_ARTICLES_PER_SOURCE || 80
+  );
+
+  const maxArticlesPerPage = Number(
+    source.maxArticlesPerPage || process.env.MAX_ARTICLES_PER_CATEGORY || 5
   );
 
   const collected = [];
@@ -398,6 +606,7 @@ async function scrapeSourceFromAllCategoryPages(source) {
   let lastError = null;
 
   console.log(`  🔎 ${scanPages.length} page(s) will be checked`);
+  console.log(`  ⚙️ Max total: ${maxArticles}, max per page: ${maxArticlesPerPage}`);
 
   for (const scanPage of scanPages) {
     if (collected.length >= maxArticles) break;
@@ -411,7 +620,7 @@ async function scrapeSourceFromAllCategoryPages(source) {
         name: sourceName,
         sourceName,
 
-        // Important: scraper will read this URL
+        // Scraper reads this page
         url: scanPage.url,
         websiteUrl: scanPage.url,
 
@@ -419,7 +628,10 @@ async function scrapeSourceFromAllCategoryPages(source) {
         sourceUrl: getSourceHomepage(source),
         siteUrl: getSourceHomepage(source),
 
-        defaultCategory: scanPage.category || source.defaultCategory || "Latest News"
+        defaultCategory: scanPage.category || source.defaultCategory || "Latest News",
+
+        // Some scrapers use this field to limit article links
+        maxLinksPerRun: maxArticlesPerPage
       };
 
       const scrapedArticles = await scrapeNewsSource(scanSource);
@@ -428,12 +640,19 @@ async function scrapeSourceFromAllCategoryPages(source) {
         continue;
       }
 
+      let addedFromThisPage = 0;
+
       for (const rawArticle of scrapedArticles) {
         if (collected.length >= maxArticles) break;
+        if (addedFromThisPage >= maxArticlesPerPage) break;
 
         const article = normalizeArticle(rawArticle, scanSource, scanPage);
 
         if (!article.title || !article.articleUrl) {
+          continue;
+        }
+
+        if (isBadArticleUrl(article.articleUrl)) {
           continue;
         }
 
@@ -443,10 +662,11 @@ async function scrapeSourceFromAllCategoryPages(source) {
 
         seenArticleUrls.add(article.articleUrl);
         collected.push(article);
+        addedFromThisPage++;
       }
 
       console.log(
-        `  ✅ Found ${scrapedArticles.length} article(s) from ${scanPage.url}`
+        `  ✅ Found ${scrapedArticles.length} article(s), added ${addedFromThisPage} from ${scanPage.url}`
       );
     } catch (error) {
       pageErrorCount++;
