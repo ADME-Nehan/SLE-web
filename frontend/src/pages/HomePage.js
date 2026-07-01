@@ -169,7 +169,7 @@ export default function HomePage() {
           boxSizing: "border-box"
         }}
       >
-        {(search || category !== "All") && (
+        {search && (
           <div
             style={{
               display: "flex",
@@ -180,33 +180,14 @@ export default function HomePage() {
               marginBottom: 22
             }}
           >
-            {category !== "All" && (
-              <span
-                style={{
-                  padding: "7px 14px",
-                  borderRadius: 999,
-                  background: "var(--accent-dim)",
-                  color: "var(--accent)",
-                  fontSize: 13,
-                  fontWeight: 700
-                }}
-              >
-                {category}
-              </span>
-            )}
+            <span style={{ fontSize: 14, color: "var(--text2)" }}>
+              Results for{" "}
+              <span style={{ color: "var(--accent)" }}>"{search}"</span>
+            </span>
 
-            {search && (
-              <>
-                <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                  Results for{" "}
-                  <span style={{ color: "var(--accent)" }}>"{search}"</span>
-                </span>
-
-                <button className="btn btn-ghost btn-sm" onClick={clearSearch}>
-                  ✕ Clear
-                </button>
-              </>
-            )}
+            <button className="btn btn-ghost btn-sm" onClick={clearSearch}>
+              ✕ Clear
+            </button>
           </div>
         )}
 
