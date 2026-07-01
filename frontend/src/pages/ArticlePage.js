@@ -191,14 +191,7 @@ export default function ArticlePage() {
     <div style={{ minHeight: "100vh" }}>
       <Navbar />
 
-      <div
-        className="container"
-        style={{
-          maxWidth: 780,
-          paddingTop: 32,
-          paddingBottom: 64
-        }}
-      >
+      <div className="container article-page-container">
         <Link
           to="/"
           style={{

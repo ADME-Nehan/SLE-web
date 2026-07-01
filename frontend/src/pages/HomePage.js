@@ -23,25 +23,8 @@ const CATEGORIES = [
 
 function CategoryBar({ active, onChange }) {
   return (
-    <div
-      style={{
-        width: "100%",
-        borderBottom: "1px solid var(--border)",
-        background: "rgba(13,13,13,0.96)"
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1100,
-          margin: "0 auto",
-          padding: "14px 20px",
-          display: "flex",
-          justifyContent: "center",
-          gap: 8,
-          overflowX: "auto",
-          scrollbarWidth: "none"
-        }}
-      >
+    <div className="category-bar">
+      <div className="category-bar-inner">
         {CATEGORIES.map((cat) => {
           const isActive = active === cat;
 
@@ -49,20 +32,10 @@ function CategoryBar({ active, onChange }) {
             <button
               key={cat}
               onClick={() => onChange(cat)}
+              className={`category-pill ${isActive ? 'active' : ''}`}
               style={{
-                padding: "7px 16px",
-                borderRadius: 999,
-                border: isActive
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border)",
-                background: isActive ? "var(--accent-dim)" : "transparent",
-                color: isActive ? "var(--accent)" : "var(--text2)",
-                fontSize: 13,
                 fontWeight: isActive ? 700 : 500,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                transition: "all 0.2s"
+                color: isActive ? 'var(--accent)' : 'var(--text2)'
               }}
             >
               {cat}
@@ -161,14 +134,7 @@ export default function HomePage() {
 
       <CategoryBar active={category} onChange={handleCategory} />
 
-      <main
-        style={{
-          maxWidth: 1100,
-          margin: "0 auto",
-          padding: "28px 20px 48px",
-          boxSizing: "border-box"
-        }}
-      >
+      <main className="home-main">
         {search && (
           <div
             style={{
@@ -221,14 +187,7 @@ export default function HomePage() {
         ) : (
           <div className="fade-in">
             {featured && !search && page === 1 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 320px",
-                  gap: 16,
-                  marginBottom: 18
-                }}
-              >
+                      <div className="featured-layout">
                 <NewsCard article={featured} featured />
 
                 <aside
@@ -259,13 +218,7 @@ export default function HomePage() {
               </div>
             )}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                gap: 14
-              }}
-            >
+            <div className="article-grid">
               {(search || page > 1 ? articles : rest.slice(4)).map(
                 (article) => (
                   <NewsCard key={article.id} article={article} />
