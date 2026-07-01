@@ -13,11 +13,21 @@ export default function Navbar({ onSearch }) {
   return (
     <nav style={{
       position: 'sticky', top: 0, zIndex: 100,
+      width: '100%',
       background: 'rgba(13,13,13,0.96)',
       backdropFilter: 'blur(12px)',
       borderBottom: '1px solid #1e1e1e',
     }}>
-      <div className="container" style={{ display: 'flex', alignItems: 'center', gap: 20, height: 64 }}>
+      <div className="container" style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 20,
+        minHeight: 64,
+        padding: '0 16px',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}>
         {/* Logo */}
         <Link to="/" style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
           <img
@@ -31,7 +41,7 @@ export default function Navbar({ onSearch }) {
         <div style={{ width: 1, height: 28, background: '#2a2a2a', flexShrink: 0 }} />
 
         {/* Search */}
-        <form onSubmit={handleSearch} style={{ flex: 1, maxWidth: 440 }}>
+        <form onSubmit={handleSearch} style={{ flex: 1, maxWidth: 520, marginLeft: 'auto' }}>
           <div style={{ position: 'relative' }}>
             <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#555', fontSize: 14 }}>🔍</span>
             <input
