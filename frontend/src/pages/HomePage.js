@@ -3,77 +3,6 @@ import Navbar from "../components/Navbar";
 import NewsCard from "../components/NewsCard";
 import { getNews, getTrending } from "../utils/api";
 
-const CATEGORIES = [
-  "All",
-  "Technology",
-  "Politics",
-  "Business",
-  "Finance",
-  "Economy",
-  "Sports",
-  "Entertainment",
-  "Science",
-  "Health",
-  "World",
-  "Local News",
-  "International",
-  "Tourism",
-  "Startups"
-];
-
-function CategoryBar({ active, onChange }) {
-  return (
-    <div
-      style={{
-        width: "100%",
-        borderBottom: "1px solid var(--border)",
-        background: "rgba(13,13,13,0.96)"
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1100,
-          margin: "0 auto",
-          padding: "14px 20px",
-          display: "flex",
-          justifyContent: "center",
-          gap: 8,
-          overflowX: "auto",
-          scrollbarWidth: "none"
-        }}
-      >
-        {CATEGORIES.map((cat) => {
-          const isActive = active === cat;
-
-          return (
-            <button
-              key={cat}
-              onClick={() => onChange(cat)}
-              style={{
-                padding: "7px 16px",
-                borderRadius: 999,
-                border: isActive
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border)",
-                background: isActive ? "var(--accent-dim)" : "transparent",
-                color: isActive ? "var(--accent)" : "var(--text2)",
-                fontSize: 13,
-                fontWeight: isActive ? 700 : 500,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                transition: "all 0.2s"
-              }}
-            >
-              {cat}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function getArticlesFromResponse(res) {
   return res?.data?.articles || res?.articles || [];
 }
@@ -89,7 +18,6 @@ function getTrendingFromResponse(res) {
 export default function HomePage() {
   const [articles, setArticles] = useState([]);
   const [trending, setTrending] = useState([]);
-  const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -103,10 +31,6 @@ export default function HomePage() {
         page,
         limit: 20
       };
-
-      if (category !== "All") {
-        params.category = category;
-      }
 
       if (search) {
         params.search = search;
@@ -123,7 +47,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [category, search, page]);
+  }, [search, page]);
 
   useEffect(() => {
     fetchNews();
@@ -142,11 +66,6 @@ export default function HomePage() {
     setPage(1);
   };
 
-  const handleCategory = (cat) => {
-    setCategory(cat);
-    setPage(1);
-  };
-
   const clearSearch = () => {
     setSearch("");
     setPage(1);
@@ -159,8 +78,6 @@ export default function HomePage() {
     <div style={{ minHeight: "100vh" }}>
       <Navbar onSearch={handleSearch} />
 
-      <CategoryBar active={category} onChange={handleCategory} />
-
       <main
         style={{
           maxWidth: 1100,
@@ -169,7 +86,7 @@ export default function HomePage() {
           boxSizing: "border-box"
         }}
       >
-        {(search || category !== "All") && (
+        {search && (
           <div
             style={{
               display: "flex",
@@ -180,33 +97,14 @@ export default function HomePage() {
               marginBottom: 22
             }}
           >
-            {category !== "All" && (
-              <span
-                style={{
-                  padding: "7px 14px",
-                  borderRadius: 999,
-                  background: "var(--accent-dim)",
-                  color: "var(--accent)",
-                  fontSize: 13,
-                  fontWeight: 700
-                }}
-              >
-                {category}
-              </span>
-            )}
+            <span style={{ fontSize: 14, color: "var(--text2)" }}>
+              Results for{" "}
+              <span style={{ color: "var(--accent)" }}>"{search}"</span>
+            </span>
 
-            {search && (
-              <>
-                <span style={{ fontSize: 14, color: "var(--text2)" }}>
-                  Results for{" "}
-                  <span style={{ color: "var(--accent)" }}>"{search}"</span>
-                </span>
-
-                <button className="btn btn-ghost btn-sm" onClick={clearSearch}>
-                  ✕ Clear
-                </button>
-              </>
-            )}
+            <button className="btn btn-ghost btn-sm" onClick={clearSearch}>
+              ✕ Clear
+            </button>
           </div>
         )}
 
