@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
 
 :root {
   --bg: #0d0d0d;
@@ -11,8 +11,8 @@
   --text: #f0f0f0;
   --text2: #888;
   --text3: #555;
-  --display: 'Playfair Display', Georgia, serif;
-  --body: 'Inter', system-ui, sans-serif;
+  --display: 'Poppins', system-ui, sans-serif;
+  --body: 'Poppins', system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
