@@ -21,7 +21,7 @@ export default function Navbar({ onSearch }) {
       <div className="container" style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         gap: 20,
         minHeight: 64,
         padding: '0 16px',
