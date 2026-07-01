@@ -1,24 +1,69 @@
-const cron = require('node-cron');
-const { runNewsPipeline } = require('./newsService');
+const cron = require("node-cron");
+const newsService = require("./newsService");
 
-// Run every 2 hours
-cron.schedule('0 */2 * * *', async () => {
-  console.log('⏰ [2hr] Scheduled pipeline triggered at', new Date().toISOString());
-  try {
-    await runNewsPipeline();
-  } catch (err) {
-    console.error('Scheduler error:', err.message);
+const runPipeline = newsService.runNewsPipeline || newsService.scanAllSources;
+
+let started = false;
+let running = false;
+
+async function executePipeline(reason = "manual") {
+  if (!runPipeline) {
+    console.error(
+      "❌ No pipeline function found. Export runNewsPipeline or scanAllSources from newsService.js"
+    );
+    return;
   }
-});
 
-// Run once on startup after 8 second delay
-setTimeout(async () => {
-  console.log('🚀 Initial pipeline run on startup...');
-  try {
-    await runNewsPipeline();
-  } catch (err) {
-    console.error('Startup pipeline error:', err.message);
+  if (running) {
+    console.log("⏳ Pipeline already running. Skipping duplicate run.");
+    return;
   }
-}, 8000);
 
-console.log('📅 Scheduler started — auto-fetch every 2 hours');
+  running = true;
+
+  console.log(`⏰ [${reason}] Pipeline triggered at ${new Date().toISOString()}`);
+
+  try {
+    const result = await runPipeline();
+
+    console.log("✅ Pipeline completed:", result || "Done");
+  } catch (err) {
+    console.error("❌ Pipeline error:", err.message);
+  } finally {
+    running = false;
+  }
+}
+
+function startScheduler() {
+  if (started) return;
+
+  started = true;
+
+  // Every 1 hour
+  const schedule = process.env.SCAN_CRON || "0 * * * *";
+
+  cron.schedule(
+    schedule,
+    async () => {
+      await executePipeline("1hr");
+    },
+    {
+      timezone: "Asia/Colombo"
+    }
+  );
+
+  // Run once on startup after 8 seconds
+  setTimeout(async () => {
+    await executePipeline("startup");
+  }, 8000);
+
+  console.log(`📅 Scheduler started — auto-fetch schedule: ${schedule}`);
+}
+
+// Auto start when this file is required
+startScheduler();
+
+module.exports = {
+  startScheduler,
+  executePipeline
+};
