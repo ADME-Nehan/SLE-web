@@ -6,7 +6,7 @@ AI-powered news aggregator using Groq AI + Firebase + React.
 
 ## 🔐 Admin Security (2-layer)
 
-1. **Secret URL** — Admin page is hidden at a custom path, e.g. `/manage-news-2024`
+1. **Secret URL** — Admin page is hidden at a custom path,``` e.g. `/manage-news-2024` ```
 2. **Password popup** — Even if someone finds the URL, they need the password
 
 No login page, no Firebase Auth needed.
