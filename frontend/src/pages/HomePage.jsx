@@ -1,23 +1,19 @@
 import { useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
-import CategoryBar from "../components/CategoryBar";
 import NewsCard from "../components/NewsCard";
-import { getCategories, getNews, getApiError } from "../utils/api";
+import { getNews, getApiError } from "../utils/api";
 
 export default function HomePage() {
   const [articles, setArticles] = useState([]);
-  const [categories, setCategories] = useState(["All"]);
-  const [activeCategory, setActiveCategory] = useState("All");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadNews(category = activeCategory) {
+  async function loadNews() {
     setLoading(true);
     setError("");
 
     try {
       const res = await getNews({
-        category,
         limit: 60
       });
 
@@ -29,56 +25,20 @@ export default function HomePage() {
     }
   }
 
-  async function loadCategories() {
-    try {
-      const res = await getCategories();
-      setCategories(res.data.categories || ["All"]);
-    } catch {
-      setCategories(["All"]);
-    }
-  }
-
   useEffect(() => {
-    loadCategories();
-    loadNews("All");
+    loadNews();
   }, []);
-
-  function handleCategoryChange(category) {
-    setActiveCategory(category);
-    loadNews(category);
-  }
 
   return (
     <div>
       <Navbar />
 
       <main>
-        <section className="hero">
-          <div className="hero-kicker">RSS News Aggregator</div>
-          <h1>News that matters for Sri Lankan entrepreneurs.</h1>
-          <p>
-            SLE collects RSS news, filters entrepreneur-related updates, and
-            shows useful business news in one place.
-          </p>
-
-          <div className="hero-actions">
-            <button className="btn btn-primary" onClick={() => loadNews()}>
-              Refresh News
-            </button>
-          </div>
-        </section>
-
-        <CategoryBar
-          active={activeCategory}
-          categories={categories}
-          onChange={handleCategoryChange}
-        />
-
         <section className="container section">
           <div className="section-header">
             <div>
               <h2>Latest News</h2>
-              <p>{activeCategory} category</p>
+              <p>Filtered RSS updates</p>
             </div>
 
             <span className="count-badge">{articles.length} articles</span>
