@@ -157,10 +157,12 @@ function buildSourcePayload(item, source) {
     rssUrl: getRssUrl(source),
 
     articleUrl: normalizeUrl(item.articleUrl),
+    imageUrl: normalizeUrl(item.imageUrl || ""),
+
     title: cleanText(item.title),
     description: buildSimpleSummary(item),
 
-    category: item.category || source.category || "Business",
+    category: item.category || "Business",
     publishedAt: item.publishedAt || null,
 
     keywordScore: item.keywordScore || 0,
@@ -192,6 +194,9 @@ function buildPrimaryArticlePayload(item, sourcePayload) {
     articleUrl,
     url: articleUrl,
     originalUrl: articleUrl,
+
+    imageUrl: sourcePayload.imageUrl || "",
+    imageSourceName: sourcePayload.imageUrl ? sourcePayload.sourceName : "",
 
     sourceName: sourcePayload.sourceName,
     sourceUrl: sourcePayload.sourceUrl,
@@ -422,6 +427,11 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
     sources: updatedSources,
     sourceCount: updatedSources.length,
     allArticleUrls: updatedUrls,
+
+    imageUrl: existingData.imageUrl || sourcePayload.imageUrl || "",
+    imageSourceName:
+      existingData.imageSourceName ||
+      (sourcePayload.imageUrl ? sourcePayload.sourceName : ""),
 
     keywordScore: Math.max(
       Number(existingData.keywordScore || 0),

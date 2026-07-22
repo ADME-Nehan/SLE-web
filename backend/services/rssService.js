@@ -1,17 +1,29 @@
 const Parser = require("rss-parser");
 const axios = require("axios");
-const cheerio = require("cheerio");
 const { cleanText, normalizeUrl, getNumberEnv } = require("../utils/helpers");
 const { filterRssItem } = require("../utils/keywordFilter");
 
 const parser = new Parser({
   timeout: 20000,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-    Accept: "application/rss+xml, application/xml, text/xml, */*"
+  customFields: {
+    item: [
+      ["media:content", "mediaContent", { keepArray: true }],
+      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
+      ["content:encoded", "contentEncoded"],
+      ["itunes:image", "itunesImage"],
+      ["image", "image"]
+    ]
   }
 });
+
+const REQUEST_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+  Accept:
+    "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Cache-Control": "no-cache"
+};
 
 function getSourceNameFromUrl(url) {
   try {
@@ -24,8 +36,142 @@ function getSourceNameFromUrl(url) {
   }
 }
 
-function normalizeRssItem(rawItem, rssUrl, feedTitle) {
+function normalizeAssetUrl(value, baseUrl) {
+  try {
+    const raw = cleanText(value);
+
+    if (!raw) return "";
+    if (raw.startsWith("data:")) return "";
+    if (raw.startsWith("blob:")) return "";
+
+    return new URL(raw, baseUrl).href;
+  } catch {
+    return "";
+  }
+}
+
+function getImageFromObject(value, baseUrl) {
+  if (!value) return "";
+
+  if (typeof value === "string") {
+    return normalizeAssetUrl(value, baseUrl);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = getImageFromObject(item, baseUrl);
+      if (result) return result;
+    }
+
+    return "";
+  }
+
+  if (typeof value === "object") {
+    const direct =
+      value.url ||
+      value.href ||
+      value.link ||
+      value.src ||
+      value._ ||
+      value.$?.url ||
+      value.$?.href ||
+      value.$?.src;
+
+    return normalizeAssetUrl(direct, baseUrl);
+  }
+
+  return "";
+}
+
+function extractImageFromHtml(html, baseUrl) {
+  const text = String(html || "");
+
+  if (!text) return "";
+
+  const patterns = [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["'][^>]*>/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["'][^>]*>/i,
+    /<img[^>]+src=["']([^"']+)["'][^>]*>/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+
+    if (match?.[1]) {
+      const imageUrl = normalizeAssetUrl(match[1], baseUrl);
+
+      if (imageUrl) {
+        return imageUrl;
+      }
+    }
+  }
+
+  return "";
+}
+
+function extractRssImage(rawItem, baseUrl) {
+  const candidates = [
+    rawItem.enclosure,
+    rawItem.mediaContent,
+    rawItem.mediaThumbnail,
+    rawItem.itunesImage,
+    rawItem.image
+  ];
+
+  for (const candidate of candidates) {
+    const imageUrl = getImageFromObject(candidate, baseUrl);
+
+    if (imageUrl) {
+      return imageUrl;
+    }
+  }
+
+  const htmlFields = [
+    rawItem.contentEncoded,
+    rawItem.content,
+    rawItem.description,
+    rawItem.summary
+  ];
+
+  for (const html of htmlFields) {
+    const imageUrl = extractImageFromHtml(html, baseUrl);
+
+    if (imageUrl) {
+      return imageUrl;
+    }
+  }
+
+  return "";
+}
+
+async function extractArticleMetaImage(articleUrl) {
+  const enabled = process.env.ENABLE_ARTICLE_IMAGE_LOOKUP === "true";
+
+  if (!enabled || !articleUrl) {
+    return "";
+  }
+
+  try {
+    const response = await axios.get(articleUrl, {
+      timeout: Number(process.env.IMAGE_LOOKUP_TIMEOUT_MS || 8000),
+      maxRedirects: 5,
+      responseType: "text",
+      validateStatus: (status) => status >= 200 && status < 400,
+      headers: REQUEST_HEADERS
+    });
+
+    return extractImageFromHtml(response.data, articleUrl);
+  } catch {
+    return "";
+  }
+}
+
+async function normalizeRssItem(rawItem, rssUrl, feedTitle) {
   const articleUrl = normalizeUrl(rawItem.link || rawItem.guid || "");
+  const rssImageUrl = extractRssImage(rawItem, rssUrl);
+  const articleImageUrl = rssImageUrl || (await extractArticleMetaImage(articleUrl));
 
   return {
     title: cleanText(rawItem.title),
@@ -37,6 +183,7 @@ function normalizeRssItem(rawItem, rssUrl, feedTitle) {
         ""
     ),
     articleUrl,
+    imageUrl: articleImageUrl,
     sourceName: cleanText(feedTitle) || getSourceNameFromUrl(rssUrl),
     rssUrl,
     publishedAt:
@@ -48,140 +195,118 @@ function normalizeRssItem(rawItem, rssUrl, feedTitle) {
   };
 }
 
-function isHtmlInsteadOfRss(error) {
-  const message = String(error?.message || "").toLowerCase();
+function looksLikeHtml(value) {
+  const text = String(value || "").trim().toLowerCase();
 
   return (
-    message.includes("attribute without value") ||
-    message.includes("non-whitespace before first tag") ||
-    message.includes("unexpected close tag") ||
-    message.includes("text data outside of root node") ||
-    message.includes("invalid character in entity name")
+    text.startsWith("<!doctype html") ||
+    text.startsWith("<html") ||
+    text.includes("<body") ||
+    text.includes("cloudflare") ||
+    text.includes("access denied") ||
+    text.includes("forbidden")
   );
 }
 
-async function readHtmlCategoryPage(pageUrl) {
-  const finalUrl = normalizeUrl(pageUrl);
+function looksLikeRss(value) {
+  const text = String(value || "").trim().toLowerCase();
 
-  if (!finalUrl) {
-    throw new Error("Valid URL is required");
-  }
-
-  const response = await axios.get(finalUrl, {
-    timeout: 20000,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml"
-    }
-  });
-
-  const $ = cheerio.load(response.data);
-  const pageTitle = cleanText($("title").first().text()) || getSourceNameFromUrl(finalUrl);
-
-  const origin = new URL(finalUrl).origin;
-  const maxItems = getNumberEnv("MAX_RSS_ITEMS_PER_SOURCE", 20);
-  const seen = new Set();
-  const items = [];
-
-  $("a").each((_, el) => {
-    if (items.length >= maxItems) return;
-
-    const title = cleanText($(el).text());
-    const href = cleanText($(el).attr("href"));
-
-    if (!title || title.length < 18 || !href) return;
-
-    let articleUrl = "";
-
-    try {
-      articleUrl = new URL(href, origin).href;
-    } catch {
-      return;
-    }
-
-    const parsed = new URL(articleUrl);
-    const path = parsed.pathname.toLowerCase();
-
-    if (!articleUrl.includes("ft.lk")) return;
-    if (path.includes("/rss")) return;
-    if (path.includes("/search")) return;
-    if (path.includes("/about")) return;
-    if (path.includes("/contact")) return;
-    if (path.includes("/advertise")) return;
-    if (seen.has(articleUrl)) return;
-
-    seen.add(articleUrl);
-
-    items.push({
-      title,
-      description: title,
-      articleUrl,
-      sourceName: getSourceNameFromUrl(finalUrl),
-      rssUrl: finalUrl,
-      publishedAt: null
-    });
-  });
-
-  if (items.length === 0) {
-    throw new Error("No article links found from this page.");
-  }
-
-  return {
-    feedTitle: pageTitle,
-    rssUrl: finalUrl,
-    totalRawItems: items.length,
-    items
-  };
+  return (
+    text.startsWith("<?xml") ||
+    text.startsWith("<rss") ||
+    text.startsWith("<feed") ||
+    text.includes("<channel") ||
+    text.includes("<item") ||
+    text.includes("<entry")
+  );
 }
 
-async function readRssFeed(rssUrl) {
+async function downloadFeedXml(rssUrl) {
   const finalRssUrl = normalizeUrl(rssUrl);
 
   if (!finalRssUrl) {
     throw new Error("Valid RSS URL is required");
   }
 
+  try {
+    const response = await axios.get(finalRssUrl, {
+      timeout: 20000,
+      maxRedirects: 5,
+      responseType: "text",
+      validateStatus: () => true,
+      headers: REQUEST_HEADERS
+    });
+
+    if (response.status === 403) {
+      throw new Error(
+        "Status code 403. This RSS source is blocking server requests."
+      );
+    }
+
+    if (response.status === 404) {
+      throw new Error("Status code 404. RSS feed URL not found.");
+    }
+
+    if (response.status >= 500) {
+      throw new Error(
+        `Status code ${response.status}. Source website is unavailable or blocking the request.`
+      );
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Status code ${response.status}`);
+    }
+
+    const xml = String(response.data || "");
+
+    if (looksLikeHtml(xml)) {
+      throw new Error(
+        "This URL returned HTML, not RSS XML. Use a direct RSS XML feed URL."
+      );
+    }
+
+    if (!looksLikeRss(xml)) {
+      throw new Error("This URL does not look like a valid RSS/Atom feed.");
+    }
+
+    return {
+      url: finalRssUrl,
+      xml
+    };
+  } catch (error) {
+    throw new Error(error.message || "Failed to download RSS feed");
+  }
+}
+
+async function readRssFeed(rssUrl) {
+  const { url, xml } = await downloadFeedXml(rssUrl);
+
   let feed;
 
   try {
-    feed = await parser.parseURL(finalRssUrl);
+    feed = await parser.parseString(xml);
   } catch (error) {
-    if (
-      error?.response?.status === 404 ||
-      String(error?.message || "").includes("Status code 404")
-    ) {
-      console.log("RSS URL 404. Trying HTML category page fallback...");
-      return readHtmlCategoryPage(finalRssUrl);
-    }
-
-    if (isHtmlInsteadOfRss(error)) {
-      console.log("URL is HTML, not RSS. Trying HTML category page fallback...");
-      return readHtmlCategoryPage(finalRssUrl);
-    }
-
-    throw error;
+    throw new Error(`RSS parse failed: ${error.message}`);
   }
 
   const maxItems = getNumberEnv("MAX_RSS_ITEMS_PER_SOURCE", 20);
   const rawItems = Array.isArray(feed.items) ? feed.items : [];
 
-  const items = rawItems
-    .map((item) => normalizeRssItem(item, finalRssUrl, feed.title))
-    .filter((item) => item.title && item.articleUrl)
-    .slice(0, maxItems);
+  const items = await Promise.all(
+    rawItems.slice(0, maxItems).map((item) => normalizeRssItem(item, url, feed.title))
+  );
 
-  if (items.length === 0) {
-    throw new Error(
-      "RSS feed was read, but no valid article items were found. Try another category feed URL."
-    );
+  const validItems = items.filter((item) => item.title && item.articleUrl);
+
+  if (validItems.length === 0) {
+    throw new Error("RSS feed was read, but no valid article items were found.");
   }
 
   return {
-    feedTitle: feed.title || getSourceNameFromUrl(finalRssUrl),
-    rssUrl: finalRssUrl,
+    feedTitle: feed.title || getSourceNameFromUrl(url),
+    rssUrl: url,
     totalRawItems: rawItems.length,
-    items
+    items: validItems
   };
 }
 

@@ -26,6 +26,7 @@ function normalizeSources(article) {
     {
       sourceName: article?.sourceName || "RSS Source",
       articleUrl: article?.articleUrl || article?.url || "#",
+      imageUrl: article?.imageUrl || "",
       title: article?.title || article?.headline || "Untitled News",
       description:
         article?.summary ||
@@ -35,6 +36,13 @@ function normalizeSources(article) {
       publishedAt: article?.publishedAt || article?.createdAt
     }
   ];
+}
+
+function getMainImage(article, sources) {
+  if (article?.imageUrl) return article.imageUrl;
+
+  const sourceWithImage = sources.find((source) => source.imageUrl);
+  return sourceWithImage?.imageUrl || "";
 }
 
 export default function NewsDetailPage() {
@@ -52,9 +60,10 @@ export default function NewsDetailPage() {
     try {
       const res = await getArticleById(id);
       const loadedArticle = res.data.article;
+      const loadedSources = normalizeSources(loadedArticle);
 
       setArticle(loadedArticle);
-      setSources(normalizeSources(loadedArticle));
+      setSources(loadedSources);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -65,6 +74,8 @@ export default function NewsDetailPage() {
   useEffect(() => {
     loadArticle();
   }, [id]);
+
+  const mainImage = getMainImage(article, sources);
 
   return (
     <div>
@@ -84,13 +95,28 @@ export default function NewsDetailPage() {
         ) : (
           <>
             <section className="card news-detail-hero">
+              {mainImage ? (
+                <div className="news-detail-main-image-wrap">
+                  <img
+                    src={mainImage}
+                    alt={article.title || "News image"}
+                    className="news-detail-main-image"
+                    onError={(e) => {
+                      e.currentTarget.parentElement.style.display = "none";
+                    }}
+                  />
+                </div>
+              ) : null}
+
               <div className="detail-meta-row">
                 {article.isTopNews ? (
                   <span className="top-news-badge">Top News</span>
                 ) : null}
 
                 <span className="source-badge">
-                  {sources.length > 1 ? `${sources.length} Sources` : sources[0]?.sourceName}
+                  {sources.length > 1
+                    ? `${sources.length} Sources`
+                    : sources[0]?.sourceName}
                 </span>
 
                 <span>{formatDate(article.createdAt)}</span>
@@ -98,7 +124,12 @@ export default function NewsDetailPage() {
 
               <h1>{article.title || article.headline || "Untitled News"}</h1>
 
-
+              {/* <p>
+                {article.summary ||
+                  article.description ||
+                  article.whyItMatters ||
+                  "This story was collected from RSS sources."}
+              </p> */}
             </section>
 
             <section className="source-comparison-section">
@@ -111,7 +142,25 @@ export default function NewsDetailPage() {
 
               <div className="source-comparison-list">
                 {sources.map((source, index) => (
-                  <article className="card source-comparison-card" key={`${source.articleUrl}-${index}`}>
+                  <article
+                    className="card source-comparison-card"
+                    key={`${source.articleUrl}-${index}`}
+                  >
+                    {source.imageUrl ? (
+                      <div className="source-comparison-image-wrap">
+                        <img
+                          src={source.imageUrl}
+                          alt={source.title || "Source image"}
+                          className="source-comparison-image"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.parentElement.style.display =
+                              "none";
+                          }}
+                        />
+                      </div>
+                    ) : null}
+
                     <div className="source-comparison-top">
                       <span className="source-badge">
                         {source.sourceName || `Source ${index + 1}`}
@@ -120,9 +169,7 @@ export default function NewsDetailPage() {
                       <small>{formatDate(source.publishedAt)}</small>
                     </div>
 
-                    <h3>
-                      {source.sourceName || `Source ${index + 1}`} says:
-                    </h3>
+                    <h3>{source.sourceName || `Source ${index + 1}`} says:</h3>
 
                     <h2>{source.title || article.title}</h2>
 
