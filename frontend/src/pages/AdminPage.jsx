@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
 import SourceCard from "../components/SourceCard";
-import NewsCard from "../components/NewsCard";
 import {
   addSource,
   deleteSource,
@@ -10,7 +9,7 @@ import {
   getNews,
   getSources,
   runAllSources,
-  testRssFilter,
+  updateArticlePriority,
   updateSource
 } from "../utils/api";
 
@@ -45,9 +44,6 @@ export default function AdminPage() {
     active: true
   });
 
-  const [testUrl, setTestUrl] = useState("");
-  const [testResult, setTestResult] = useState(null);
-
   async function loadSources() {
     try {
       const res = await getSources();
@@ -59,7 +55,7 @@ export default function AdminPage() {
 
   async function loadArticles() {
     try {
-      const res = await getNews({ limit: 20 });
+      const res = await getNews({ limit: 80 });
       setArticles(res.data.articles || []);
     } catch (err) {
       setMessage(getApiError(err));
@@ -81,13 +77,45 @@ export default function AdminPage() {
     }));
   }
 
+  function getSourceCount(article) {
+    return article.sourceCount || article.sources?.length || 1;
+  }
+
+  function getSourceNames(article) {
+    if (Array.isArray(article.sources) && article.sources.length > 0) {
+      return article.sources
+        .map((source) => source.sourceName || "RSS Source")
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    return article.sourceName || "RSS Source";
+  }
+
+  function buildFetchMessage(prefix, result) {
+    return `${prefix}: checked ${result.checkedItems || 0}, saved ${
+      result.savedCount || 0
+    }, merged ${result.mergedCount || 0}, rejected ${
+      result.rejectedCount || 0
+    }, duplicates ${result.duplicateCount || 0}`;
+  }
+
+  function buildRunAllMessage(result) {
+    return `Run complete: checked ${result.totalChecked || 0}, saved ${
+      result.totalSaved || 0
+    }, merged ${result.totalMerged || 0}, rejected ${
+      result.totalRejected || 0
+    }, duplicates ${result.totalDuplicates || 0}`;
+  }
+
   async function handleAddSource(e) {
     e.preventDefault();
     setMessage("");
     setGlobalBusy(true);
 
     try {
-      await addSource(form);
+      const addRes = await addSource(form);
+      const newSource = addRes.data.source;
 
       setForm({
         name: "",
@@ -97,8 +125,21 @@ export default function AdminPage() {
         active: true
       });
 
-      setMessage("RSS source added successfully.");
-      await loadSources();
+      if (newSource?.id) {
+        setMessage("RSS source added. Fetching news now...");
+
+        const fetchRes = await fetchOneSource(newSource.id);
+        const result = fetchRes.data.result;
+
+        setMessage(buildFetchMessage("Source added and fetched", result));
+
+        await loadAll();
+        setTab("articles");
+      } else {
+        setMessage("RSS source added successfully.");
+        await loadSources();
+        setTab("sources");
+      }
     } catch (err) {
       setMessage(getApiError(err));
     } finally {
@@ -114,11 +155,10 @@ export default function AdminPage() {
       const res = await fetchOneSource(source.id);
       const result = res.data.result;
 
-      setMessage(
-        `Fetched ${result.sourceName}: checked ${result.checkedItems}, saved ${result.savedCount}, rejected ${result.rejectedCount}, duplicates ${result.duplicateCount}`
-      );
+      setMessage(buildFetchMessage(`Fetched ${result.sourceName}`, result));
 
       await loadAll();
+      setTab("articles");
     } catch (err) {
       setMessage(getApiError(err));
     } finally {
@@ -134,11 +174,10 @@ export default function AdminPage() {
       const res = await runAllSources();
       const result = res.data.result;
 
-      setMessage(
-        `Run complete: checked ${result.totalChecked}, saved ${result.totalSaved}, rejected ${result.totalRejected}, duplicates ${result.totalDuplicates}`
-      );
+      setMessage(buildRunAllMessage(result));
 
       await loadAll();
+      setTab("articles");
     } catch (err) {
       setMessage(getApiError(err));
     } finally {
@@ -180,20 +219,53 @@ export default function AdminPage() {
     }
   }
 
-  async function handleTestRss(e) {
-    e.preventDefault();
-    setMessage("");
-    setTestResult(null);
-    setGlobalBusy(true);
+  async function handleSetPriority(article) {
+    const value = window.prompt(
+      "Enter Top News priority number. Higher number shows first.",
+      article.priority || 1
+    );
+
+    if (value === null) return;
+
+    const priority = Number(value);
+
+    if (!Number.isFinite(priority)) {
+      setMessage("Invalid priority number.");
+      return;
+    }
+
+    setBusyId(article.id);
 
     try {
-      const res = await testRssFilter(testUrl);
-      setTestResult(res.data.result);
-      setMessage("RSS test completed.");
+      await updateArticlePriority(article.id, {
+        isTopNews: true,
+        priority
+      });
+
+      setMessage("Article marked as Top News.");
+      await loadArticles();
     } catch (err) {
       setMessage(getApiError(err));
     } finally {
-      setGlobalBusy(false);
+      setBusyId("");
+    }
+  }
+
+  async function handleRemoveTopNews(article) {
+    setBusyId(article.id);
+
+    try {
+      await updateArticlePriority(article.id, {
+        isTopNews: false,
+        priority: 0
+      });
+
+      setMessage("Article removed from Top News.");
+      await loadArticles();
+    } catch (err) {
+      setMessage(getApiError(err));
+    } finally {
+      setBusyId("");
     }
   }
 
@@ -209,12 +281,16 @@ export default function AdminPage() {
             <div className="hero-kicker">Admin Panel</div>
             <h1>SLE RSS Control Center</h1>
             <p>
-              Manage RSS sources, test keyword filtering, fetch news, and view
+              Manage RSS sources, fetch news, mark Top News, and view grouped
               saved articles.
             </p>
           </div>
 
-          <button className="btn btn-primary" onClick={handleRunAll} disabled={globalBusy}>
+          <button
+            className="btn btn-primary"
+            onClick={handleRunAll}
+            disabled={globalBusy}
+          >
             {globalBusy ? "Running..." : "Run All RSS Sources"}
           </button>
         </section>
@@ -222,16 +298,21 @@ export default function AdminPage() {
         {message ? <div className="message-box">{message}</div> : null}
 
         <div className="tabs">
-          <button className={tabClass("sources")} onClick={() => setTab("sources")}>
+          <button
+            className={tabClass("sources")}
+            onClick={() => setTab("sources")}
+          >
             Sources
           </button>
+
           <button className={tabClass("add")} onClick={() => setTab("add")}>
             Add Source
           </button>
-          <button className={tabClass("test")} onClick={() => setTab("test")}>
-            Test RSS
-          </button>
-          <button className={tabClass("articles")} onClick={() => setTab("articles")}>
+
+          <button
+            className={tabClass("articles")}
+            onClick={() => setTab("articles")}
+          >
             Saved Articles
           </button>
         </div>
@@ -272,7 +353,8 @@ export default function AdminPage() {
           <section className="panel">
             <h2>Add RSS Source</h2>
             <p className="muted">
-              Add RSS feed URLs only. Example: https://example.com/rss
+              Add RSS feed URLs only. After adding, the system will fetch news
+              automatically.
             </p>
 
             <form className="form-grid" onSubmit={handleAddSource}>
@@ -281,7 +363,7 @@ export default function AdminPage() {
                 <input
                   value={form.name}
                   onChange={(e) => updateForm("name", e.target.value)}
-                  placeholder="Daily FT"
+                  placeholder="Ada Derana"
                 />
               </label>
 
@@ -316,72 +398,14 @@ export default function AdminPage() {
                 </select>
               </label>
 
-              <button className="btn btn-primary" type="submit" disabled={globalBusy}>
-                {globalBusy ? "Adding..." : "Add RSS Source"}
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={globalBusy}
+              >
+                {globalBusy ? "Adding and Fetching..." : "Add RSS Source"}
               </button>
             </form>
-          </section>
-        ) : null}
-
-        {tab === "test" ? (
-          <section className="panel">
-            <h2>Test RSS Filter</h2>
-            <p className="muted">
-              This only reads and filters. It does not save to Firebase.
-            </p>
-
-            <form className="rss-test-form" onSubmit={handleTestRss}>
-              <input
-                value={testUrl}
-                onChange={(e) => setTestUrl(e.target.value)}
-                placeholder="Paste RSS feed URL"
-                required
-              />
-
-              <button className="btn btn-primary" disabled={globalBusy}>
-                {globalBusy ? "Testing..." : "Test Filter"}
-              </button>
-            </form>
-
-            {testResult ? (
-              <div className="test-result">
-                <div className="result-grid">
-                  <div>
-                    <strong>{testResult.feedTitle}</strong>
-                    <span>Feed title</span>
-                  </div>
-                  <div>
-                    <strong>{testResult.checkedItems}</strong>
-                    <span>Checked</span>
-                  </div>
-                  <div>
-                    <strong>{testResult.acceptedCount}</strong>
-                    <span>Accepted</span>
-                  </div>
-                  <div>
-                    <strong>{testResult.rejectedCount}</strong>
-                    <span>Rejected</span>
-                  </div>
-                </div>
-
-                <h3>Accepted Items</h3>
-
-                {testResult.acceptedItems?.length ? (
-                  <div className="mini-list">
-                    {testResult.acceptedItems.map((item) => (
-                      <div key={item.articleUrl} className="mini-item">
-                        <strong>{item.title}</strong>
-                        <span>
-                          {item.category} • Score {item.keywordScore}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted">No accepted items.</p>
-                )}
-              </div>
-            ) : null}
           </section>
         ) : null}
 
@@ -401,9 +425,65 @@ export default function AdminPage() {
             {articles.length === 0 ? (
               <div className="state-box">No saved articles yet.</div>
             ) : (
-              <div className="news-grid">
+              <div className="admin-article-list">
                 {articles.map((article) => (
-                  <NewsCard key={article.id} article={article} />
+                  <div className="card admin-article-card" key={article.id}>
+                    <div>
+                      <div className="admin-article-meta">
+                        {article.isTopNews ? (
+                          <span className="top-news-badge">
+                            Top News • Priority {article.priority || 0}
+                          </span>
+                        ) : (
+                          <span className="source-badge">Normal</span>
+                        )}
+
+                        <span className="source-badge">
+                          {getSourceCount(article)} Source(s)
+                        </span>
+                      </div>
+
+                      <h3>{article.title || article.headline}</h3>
+
+                      <p>
+                        {article.summary ||
+                          article.description ||
+                          article.whyItMatters ||
+                          "No description"}
+                      </p>
+
+                      <p className="admin-source-names">
+                        Sources: {getSourceNames(article)}
+                      </p>
+                    </div>
+
+                    <div className="admin-article-actions">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleSetPriority(article)}
+                        disabled={busyId === article.id}
+                      >
+                        Set Top News
+                      </button>
+
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleRemoveTopNews(article)}
+                        disabled={busyId === article.id}
+                      >
+                        Remove Top
+                      </button>
+
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={`/news/${article.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View
+                      </a>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

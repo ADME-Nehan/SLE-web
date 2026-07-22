@@ -1,29 +1,65 @@
 import { Link, useLocation } from "react-router-dom";
+import { useState } from "react";
 
 export default function Navbar() {
   const location = useLocation();
+  const [open, setOpen] = useState(false);
 
   return (
-    <header className="navbar">
-      <Link to="/" className="brand">
-        <div className="brand-mark">SLE</div>
-        <div>
-          <div className="brand-title">Sri Lankan Entrepreneur</div>
-          <div className="brand-subtitle">RSS News Aggregator</div>
-        </div>
-      </Link>
+    <header className="sle-navbar">
+      <div className="sle-navbar-inner">
+        <Link to="/" className="sle-navbar-logo">
+          <img
+            src="/logo.svg"
+            alt="Sri Lankan Entrepreneur"
+            className="sle-navbar-logo-img"
+          />
+        </Link>
 
-      <nav className="nav-links">
-        <Link className={location.pathname === "/" ? "active" : ""} to="/">
-          News
-        </Link>
-        <Link
-          className={location.pathname === "/admin" ? "active" : ""}
-          to="/admin"
+        <button
+          type="button"
+          className="sle-navbar-menu-btn"
+          onClick={() => setOpen((prev) => !prev)}
+          aria-label="Toggle menu"
         >
-          Admin
-        </Link>
-      </nav>
+          ☰
+        </button>
+
+        <div className={`sle-navbar-content ${open ? "open" : ""}`}>
+          <nav className="sle-navbar-links">
+            <Link
+              to="/"
+              className={`sle-nav-link ${
+                location.pathname === "/" ? "sle-nav-link-active" : ""
+              }`}
+              onClick={() => setOpen(false)}
+            >
+              Home
+            </Link>
+
+            <Link
+              to="/admin"
+              className={`sle-nav-link ${
+                location.pathname === "/admin" ? "sle-nav-link-active" : ""
+              }`}
+              onClick={() => setOpen(false)}
+            >
+              Admin
+            </Link>
+          </nav>
+
+          <div className="sle-navbar-search">
+            <div className="sle-navbar-search-box">
+              <span className="sle-navbar-search-icon">⌕</span>
+              <input
+                className="sle-navbar-search-input"
+                type="text"
+                placeholder="Search latest updates..."
+              />
+            </div>
+          </div>
+        </div>
+      </div>
     </header>
   );
 }

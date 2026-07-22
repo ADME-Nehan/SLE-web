@@ -5,6 +5,7 @@ require("dotenv").config();
 const rssRoutes = require("./routes/rssRoutes");
 const sourceRoutes = require("./routes/sourceRoutes");
 const newsRoutes = require("./routes/newsRoutes");
+const { startScheduler } = require("./services/schedulerService");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,4 +60,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 SLE RSS backend running on port ${PORT}`);
+
+  startScheduler();
 });

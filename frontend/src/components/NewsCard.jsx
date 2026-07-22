@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 function formatDate(value) {
   if (!value) return "";
 
@@ -28,33 +30,29 @@ function getSummary(article) {
 export default function NewsCard({ article }) {
   if (!article) return null;
 
-  const url = article.articleUrl || article.url || "#";
   const date = formatDate(article.publishedAt || article.createdAt);
-  const category = article.category || "Business";
   const source = article.sourceName || "RSS Source";
+  const sourceCount = article.sourceCount || article.sources?.length || 1;
 
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="news-card">
-      <div className="news-card-top">
-        <span className="news-category">{category}</span>
-        {date ? <span className="news-date">{date}</span> : null}
+    <Link to={`/news/${article.id}`} className="card sle-news-card">
+      <div className="sle-news-card-top">
+        <span className="source-badge">
+          {sourceCount > 1 ? `${sourceCount} Sources` : source}
+        </span>
+
+        {article.isTopNews ? <span className="top-news-mini">Top News</span> : null}
+
+        {date ? <small>{date}</small> : null}
       </div>
 
       <h2>{article.title || article.headline || "Untitled News"}</h2>
 
       <p>{getSummary(article)}</p>
 
-      {article.whyItMatters ? (
-        <div className="why-box">
-          <span>Why it matters</span>
-          <p>{article.whyItMatters}</p>
-        </div>
-      ) : null}
-
-      <div className="news-card-bottom">
-        <span>{source}</span>
-        <strong>Read →</strong>
+      <div className="sle-news-card-bottom">
+        <strong>Open →</strong>
       </div>
-    </a>
+    </Link>
   );
 }
