@@ -73,7 +73,10 @@ router.post("/", async (req, res) => {
       rssUrl,
       url: rssUrl,
       websiteUrl,
-      category: cleanText(req.body.category || "Business"),
+
+      category: "Auto",
+      autoCategory: true,
+
       active: req.body.active !== false,
       type: "rss",
 
@@ -83,6 +86,7 @@ router.post("/", async (req, res) => {
       lastAcceptedCount: 0,
       lastRejectedCount: 0,
       lastSavedCount: 0,
+      lastMergedCount: 0,
       lastDuplicateCount: 0,
       lastError: null,
 
@@ -136,9 +140,8 @@ router.put("/:id", async (req, res) => {
       update.websiteUrl = normalizeUrl(req.body.websiteUrl);
     }
 
-    if (req.body.category !== undefined) {
-      update.category = cleanText(req.body.category);
-    }
+    update.category = "Auto";
+    update.autoCategory = true;
 
     if (req.body.active !== undefined) {
       update.active = req.body.active === true;

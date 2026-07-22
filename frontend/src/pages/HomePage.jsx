@@ -97,12 +97,12 @@ export default function HomePage() {
                   "Untitled News"}
               </h1>
 
-              <p>
+              {/* <p>
                 {featuredArticle.summary ||
                   featuredArticle.description ||
                   featuredArticle.whyItMatters ||
                   "Read the latest update."}
-              </p>
+              </p> */}
 
               <span className="sle-featured-read">Open story →</span>
             </a>
@@ -114,15 +114,6 @@ export default function HomePage() {
             <span>Latest</span>
             <h2>News Feed</h2>
           </div>
-
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => loadNews(false)}
-            disabled={refreshing}
-          >
-            {refreshing ? "Updating..." : "Update"}
-          </button>
         </section>
 
         {loading ? (

@@ -37,20 +37,18 @@ export default function NewsCard({ article }) {
   return (
     <Link to={`/news/${article.id}`} className="card sle-news-card">
       <div className="sle-news-card-top">
-        <span className="source-badge">
-          {sourceCount > 1 ? `${sourceCount} Sources` : source}
-        </span>
-
         {article.isTopNews ? <span className="top-news-mini">Top News</span> : null}
-
-        {date ? <small>{date}</small> : null}
       </div>
 
       <h2>{article.title || article.headline || "Untitled News"}</h2>
 
-      <p>{getSummary(article)}</p>
+      {/* <p>{getSummary(article)}</p> */}
 
       <div className="sle-news-card-bottom">
+        <span className="source-badge">
+          {sourceCount > 1 ? `${sourceCount} Sources` : source}
+        </span>
+        {date ? <small>{date}</small> : null}
         <strong>Open →</strong>
       </div>
     </Link>

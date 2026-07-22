@@ -13,21 +13,6 @@ import {
   updateSource
 } from "../utils/api";
 
-const CATEGORIES = [
-  "Business",
-  "Startups",
-  "SME",
-  "Finance",
-  "Economy",
-  "Investment",
-  "Technology",
-  "Tourism",
-  "Exports",
-  "Agriculture",
-  "Policy",
-  "Local News"
-];
-
 export default function AdminPage() {
   const [tab, setTab] = useState("sources");
   const [sources, setSources] = useState([]);
@@ -40,7 +25,6 @@ export default function AdminPage() {
     name: "",
     rssUrl: "",
     websiteUrl: "",
-    category: "Business",
     active: true
   });
 
@@ -114,19 +98,23 @@ export default function AdminPage() {
     setGlobalBusy(true);
 
     try {
-      const addRes = await addSource(form);
+      const addRes = await addSource({
+        ...form,
+        category: "Auto",
+        autoCategory: true
+      });
+
       const newSource = addRes.data.source;
 
       setForm({
         name: "",
         rssUrl: "",
         websiteUrl: "",
-        category: "Business",
         active: true
       });
 
       if (newSource?.id) {
-        setMessage("RSS source added. Fetching news now...");
+        setMessage("RSS source added. Backend is checking articles now...");
 
         const fetchRes = await fetchOneSource(newSource.id);
         const result = fetchRes.data.result;
@@ -281,8 +269,8 @@ export default function AdminPage() {
             <div className="hero-kicker">Admin Panel</div>
             <h1>SLE RSS Control Center</h1>
             <p>
-              Manage RSS sources, fetch news, mark Top News, and view grouped
-              saved articles.
+              Add RSS sources only. Backend will filter needed articles,
+              auto-detect category, prevent duplicates, and group same stories.
             </p>
           </div>
 
@@ -353,8 +341,8 @@ export default function AdminPage() {
           <section className="panel">
             <h2>Add RSS Source</h2>
             <p className="muted">
-              Add RSS feed URLs only. After adding, the system will fetch news
-              automatically.
+              Paste the RSS feed URL. Category is auto-detected from each news
+              article by the backend.
             </p>
 
             <form className="form-grid" onSubmit={handleAddSource}>
@@ -386,24 +374,21 @@ export default function AdminPage() {
                 />
               </label>
 
-              <label>
-                Category
-                <select
-                  value={form.category}
-                  onChange={(e) => updateForm("category", e.target.value)}
-                >
-                  {CATEGORIES.map((category) => (
-                    <option key={category}>{category}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="auto-category-box">
+                <span>Auto Category</span>
+                <strong>Enabled</strong>
+                <p>
+                  Backend will choose Business, Finance, Economy, Technology,
+                  Tourism, Policy, Agriculture, Exports, SME, or Startups.
+                </p>
+              </div>
 
               <button
                 className="btn btn-primary"
                 type="submit"
                 disabled={globalBusy}
               >
-                {globalBusy ? "Adding and Fetching..." : "Add RSS Source"}
+                {globalBusy ? "Checking RSS Data..." : "Add Source and Fetch"}
               </button>
             </form>
           </section>
@@ -437,6 +422,10 @@ export default function AdminPage() {
                         ) : (
                           <span className="source-badge">Normal</span>
                         )}
+
+                        <span className="source-badge">
+                          {article.category || "Auto"}
+                        </span>
 
                         <span className="source-badge">
                           {getSourceCount(article)} Source(s)
