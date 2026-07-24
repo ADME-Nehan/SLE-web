@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import SourceCard from "../components/SourceCard";
 import {
@@ -6,17 +7,23 @@ import {
   deleteSource,
   fetchOneSource,
   getApiError,
+  getDashboardStats,
   getNews,
   getSources,
   runAllSources,
   updateArticlePriority,
   updateSource
 } from "../utils/api";
+import { removeAdminToken } from "../utils/auth";
 
 export default function AdminPage() {
+  const navigate = useNavigate();
+
   const [tab, setTab] = useState("sources");
   const [sources, setSources] = useState([]);
   const [articles, setArticles] = useState([]);
+  const [stats, setStats] = useState(null);
+
   const [busyId, setBusyId] = useState("");
   const [globalBusy, setGlobalBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,12 +35,28 @@ export default function AdminPage() {
     active: true
   });
 
+  function handleAuthError(err) {
+    const status = err?.response?.status;
+
+    if (status === 401 || status === 403) {
+      removeAdminToken();
+      navigate("/login", {
+        replace: true
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   async function loadSources() {
     try {
       const res = await getSources();
       setSources(res.data.sources || []);
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     }
   }
 
@@ -42,12 +65,25 @@ export default function AdminPage() {
       const res = await getNews({ limit: 80 });
       setArticles(res.data.articles || []);
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const res = await getDashboardStats();
+      setStats(res.data.stats || null);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     }
   }
 
   async function loadAll() {
-    await Promise.all([loadSources(), loadArticles()]);
+    await Promise.all([loadSources(), loadArticles(), loadStats()]);
   }
 
   useEffect(() => {
@@ -59,6 +95,14 @@ export default function AdminPage() {
       ...prev,
       [field]: value
     }));
+  }
+
+  function handleLogout() {
+    removeAdminToken();
+
+    navigate("/login", {
+      replace: true
+    });
   }
 
   function getSourceCount(article) {
@@ -81,7 +125,9 @@ export default function AdminPage() {
       result.savedCount || 0
     }, merged ${result.mergedCount || 0}, rejected ${
       result.rejectedCount || 0
-    }, duplicates ${result.duplicateCount || 0}`;
+    }, duplicates ${result.duplicateCount || 0}, AI calls ${
+      result.openAiCalls || 0
+    }`;
   }
 
   function buildRunAllMessage(result) {
@@ -89,11 +135,14 @@ export default function AdminPage() {
       result.totalSaved || 0
     }, merged ${result.totalMerged || 0}, rejected ${
       result.totalRejected || 0
-    }, duplicates ${result.totalDuplicates || 0}`;
+    }, duplicates ${result.totalDuplicates || 0}, AI calls ${
+      result.totalOpenAiCalls || 0
+    }`;
   }
 
   async function handleAddSource(e) {
     e.preventDefault();
+
     setMessage("");
     setGlobalBusy(true);
 
@@ -125,11 +174,14 @@ export default function AdminPage() {
         setTab("articles");
       } else {
         setMessage("RSS source added successfully.");
-        await loadSources();
+
+        await loadAll();
         setTab("sources");
       }
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setGlobalBusy(false);
     }
@@ -148,7 +200,9 @@ export default function AdminPage() {
       await loadAll();
       setTab("articles");
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setBusyId("");
     }
@@ -167,13 +221,16 @@ export default function AdminPage() {
       await loadAll();
       setTab("articles");
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setGlobalBusy(false);
     }
   }
 
   async function handleToggleSource(source) {
+    setMessage("");
     setBusyId(source.id);
 
     try {
@@ -181,9 +238,11 @@ export default function AdminPage() {
         active: source.active === false
       });
 
-      await loadSources();
+      await loadAll();
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setBusyId("");
     }
@@ -194,14 +253,19 @@ export default function AdminPage() {
 
     if (!ok) return;
 
+    setMessage("");
     setBusyId(source.id);
 
     try {
       await deleteSource(source.id);
+
       setMessage("Source deleted.");
-      await loadSources();
+
+      await loadAll();
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setBusyId("");
     }
@@ -222,6 +286,7 @@ export default function AdminPage() {
       return;
     }
 
+    setMessage("");
     setBusyId(article.id);
 
     try {
@@ -231,15 +296,19 @@ export default function AdminPage() {
       });
 
       setMessage("Article marked as Top News.");
-      await loadArticles();
+
+      await loadAll();
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setBusyId("");
     }
   }
 
   async function handleRemoveTopNews(article) {
+    setMessage("");
     setBusyId(article.id);
 
     try {
@@ -249,9 +318,12 @@ export default function AdminPage() {
       });
 
       setMessage("Article removed from Top News.");
-      await loadArticles();
+
+      await loadAll();
     } catch (err) {
-      setMessage(getApiError(err));
+      if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
     } finally {
       setBusyId("");
     }
@@ -270,34 +342,86 @@ export default function AdminPage() {
             <h1>SLE RSS Control Center</h1>
             <p>
               Add RSS sources only. Backend will filter needed articles,
-              auto-detect category, prevent duplicates, and group same stories.
+              auto-detect category, prevent duplicates, group same stories, and
+              use OpenAI with limited token usage.
             </p>
           </div>
 
-          <button
-            className="btn btn-primary"
-            onClick={handleRunAll}
-            disabled={globalBusy}
-          >
-            {globalBusy ? "Running..." : "Run All RSS Sources"}
-          </button>
+          <div className="admin-hero-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleRunAll}
+              disabled={globalBusy}
+            >
+              {globalBusy ? "Running..." : "Run All RSS Sources"}
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          </div>
         </section>
 
         {message ? <div className="message-box">{message}</div> : null}
 
+        {stats ? (
+          <section className="admin-stats-grid">
+            <div className="card admin-stat-card">
+              <span>Total Sources</span>
+              <strong>{stats.totalSources || 0}</strong>
+            </div>
+
+            <div className="card admin-stat-card">
+              <span>Active Sources</span>
+              <strong>{stats.activeSources || 0}</strong>
+            </div>
+
+            <div className="card admin-stat-card">
+              <span>Saved Articles</span>
+              <strong>{stats.totalArticles || 0}</strong>
+            </div>
+
+            <div className="card admin-stat-card">
+              <span>Top News</span>
+              <strong>{stats.topNewsCount || 0}</strong>
+            </div>
+
+            <div className="card admin-stat-card">
+              <span>Failed Sources</span>
+              <strong>{stats.failedSources || 0}</strong>
+            </div>
+
+            <div className="card admin-stat-card">
+              <span>Last AI Calls</span>
+              <strong>{stats.lastOpenAiCalls || 0}</strong>
+            </div>
+          </section>
+        ) : null}
+
         <div className="tabs">
           <button
+            type="button"
             className={tabClass("sources")}
             onClick={() => setTab("sources")}
           >
             Sources
           </button>
 
-          <button className={tabClass("add")} onClick={() => setTab("add")}>
+          <button
+            type="button"
+            className={tabClass("add")}
+            onClick={() => setTab("add")}
+          >
             Add Source
           </button>
 
           <button
+            type="button"
             className={tabClass("articles")}
             onClick={() => setTab("articles")}
           >
@@ -313,7 +437,7 @@ export default function AdminPage() {
                 <p>{sources.length} source(s)</p>
               </div>
 
-              <button className="btn btn-ghost" onClick={loadSources}>
+              <button type="button" className="btn btn-ghost" onClick={loadAll}>
                 Refresh
               </button>
             </div>
@@ -351,7 +475,7 @@ export default function AdminPage() {
                 <input
                   value={form.name}
                   onChange={(e) => updateForm("name", e.target.value)}
-                  placeholder="Ada Derana"
+                  placeholder="BBC Business"
                 />
               </label>
 
@@ -361,7 +485,7 @@ export default function AdminPage() {
                   required
                   value={form.rssUrl}
                   onChange={(e) => updateForm("rssUrl", e.target.value)}
-                  placeholder="https://www.example.com/rss"
+                  placeholder="https://feeds.bbci.co.uk/news/business/rss.xml"
                 />
               </label>
 
@@ -370,7 +494,7 @@ export default function AdminPage() {
                 <input
                   value={form.websiteUrl}
                   onChange={(e) => updateForm("websiteUrl", e.target.value)}
-                  placeholder="https://www.example.com"
+                  placeholder="https://www.bbc.com/news/business"
                 />
               </label>
 
@@ -379,7 +503,8 @@ export default function AdminPage() {
                 <strong>Enabled</strong>
                 <p>
                   Backend will choose Business, Finance, Economy, Technology,
-                  Tourism, Policy, Agriculture, Exports, SME, or Startups.
+                  Tourism, Policy, Agriculture, Exports, SME, Startups, or Local
+                  News.
                 </p>
               </div>
 
@@ -402,7 +527,11 @@ export default function AdminPage() {
                 <p>{articles.length} latest saved article(s)</p>
               </div>
 
-              <button className="btn btn-ghost" onClick={loadArticles}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={loadAll}
+              >
                 Refresh
               </button>
             </div>
@@ -430,7 +559,28 @@ export default function AdminPage() {
                         <span className="source-badge">
                           {getSourceCount(article)} Source(s)
                         </span>
+
+                        {article.aiAnalyzed ? (
+                          <span className="source-badge">
+                            AI {article.aiConfidence || 0}
+                          </span>
+                        ) : null}
                       </div>
+
+                      {article.imageUrl ? (
+                        <div className="admin-article-image-wrap">
+                          <img
+                            src={article.imageUrl}
+                            alt={article.title || "Article image"}
+                            className="admin-article-image"
+                            loading="lazy"
+                            onError={(e) => {
+                              e.currentTarget.parentElement.style.display =
+                                "none";
+                            }}
+                          />
+                        </div>
+                      ) : null}
 
                       <h3>{article.title || article.headline}</h3>
 
@@ -448,6 +598,7 @@ export default function AdminPage() {
 
                     <div className="admin-article-actions">
                       <button
+                        type="button"
                         className="btn btn-primary btn-sm"
                         onClick={() => handleSetPriority(article)}
                         disabled={busyId === article.id}
@@ -456,6 +607,7 @@ export default function AdminPage() {
                       </button>
 
                       <button
+                        type="button"
                         className="btn btn-ghost btn-sm"
                         onClick={() => handleRemoveTopNews(article)}
                         disabled={busyId === article.id}

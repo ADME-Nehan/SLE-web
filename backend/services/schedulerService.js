@@ -1,39 +1,44 @@
 const cron = require("node-cron");
 const { runRssPipeline } = require("./newsPipelineService");
 
-let isRunning = false;
+let schedulerStarted = false;
 
 function startScheduler() {
-  const enabled = process.env.ENABLE_RSS_SCHEDULER === "true";
+  if (schedulerStarted) return;
 
-  if (!enabled) {
-    console.log("⏸️ RSS scheduler disabled");
+  if (process.env.ENABLE_RSS_SCHEDULER !== "true") {
+    console.log("⏸ RSS scheduler disabled");
     return;
   }
 
-  cron.schedule("*/30 * * * *", async () => {
-    if (isRunning) {
-      console.log("⏳ RSS scheduler skipped because previous run is still running");
-      return;
-    }
+  const cronExpression = process.env.RSS_SCHEDULE_CRON || "0 */3 * * *";
 
-    isRunning = true;
+  if (!cron.validate(cronExpression)) {
+    console.log("❌ Invalid RSS_SCHEDULE_CRON:", cronExpression);
+    return;
+  }
+
+  schedulerStarted = true;
+
+  cron.schedule(cronExpression, async () => {
+    console.log("⏰ Scheduled RSS run started");
 
     try {
-      console.log("🔄 RSS scheduler started");
       const result = await runRssPipeline();
 
-      console.log(
-        `✅ RSS scheduler complete. Checked ${result.totalChecked}, saved ${result.totalSaved}, rejected ${result.totalRejected}, duplicates ${result.totalDuplicates}`
-      );
+      console.log("✅ Scheduled RSS run completed", {
+        checked: result.totalChecked,
+        saved: result.totalSaved,
+        merged: result.totalMerged,
+        duplicates: result.totalDuplicates,
+        aiCalls: result.totalOpenAiCalls
+      });
     } catch (error) {
-      console.error("❌ RSS scheduler failed:", error.message);
-    } finally {
-      isRunning = false;
+      console.error("❌ Scheduled RSS run failed:", error.message);
     }
   });
 
-  console.log("✅ RSS scheduler enabled. Runs every 30 minutes.");
+  console.log("✅ RSS scheduler started:", cronExpression);
 }
 
 module.exports = {

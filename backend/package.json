@@ -14,7 +14,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "firebase-admin": "^13.5.0",
+    "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.6.0",
+    "openai": "^6.49.0",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {

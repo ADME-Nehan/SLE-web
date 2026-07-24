@@ -37,14 +37,8 @@ export default function Navbar() {
               Home
             </Link>
 
-            <Link
-              to="/admin"
-              className={`sle-nav-link ${
-                location.pathname === "/admin" ? "sle-nav-link-active" : ""
-              }`}
-              onClick={() => setOpen(false)}
-            >
-              Admin
+            <Link>
+              Blog
             </Link>
           </nav>
 

@@ -1,107 +1,41 @@
 const { db } = require("../config/firebase");
 const { readAndFilterRssFeed } = require("./rssService");
+const { analyzeRssNewsItem, isOpenAiEnabled } = require("./openAiService");
 const { cleanText, normalizeUrl, getNumberEnv } = require("../utils/helpers");
-
-function getSourceName(source) {
-  return cleanText(source.name || source.sourceName || "RSS Source");
-}
-
-function getRssUrl(source) {
-  return normalizeUrl(source.rssUrl || source.url || "");
-}
-
-function getWebsiteUrl(source) {
-  return normalizeUrl(source.websiteUrl || source.siteUrl || "");
-}
-
-function buildSimpleSummary(item) {
-  return (
-    cleanText(item.description) ||
-    cleanText(item.title) ||
-    "Read the latest update from Sri Lankan Entrepreneur."
-  ).slice(0, 500);
-}
-
-function buildWhyItMatters(item) {
-  const category = item.category || "Business";
-
-  const map = {
-    Business:
-      "This update may help entrepreneurs understand business and market movement.",
-    Startups:
-      "This update may help startup founders understand opportunities and market direction.",
-    SME: "This update may help small business owners plan better decisions.",
-    Finance:
-      "This update may affect business cash flow, banking, or investment planning.",
-    Economy:
-      "This update may affect pricing, demand, and business confidence.",
-    Investment:
-      "This update may show investment opportunities or market direction.",
-    Technology:
-      "This update may help businesses understand digital and technology changes.",
-    Tourism:
-      "This update may affect tourism-related businesses and local demand.",
-    Exports:
-      "This update may affect exporters, importers, and trade-focused SMEs.",
-    Agriculture:
-      "This update may affect agri businesses, supply, pricing, or income.",
-    Policy:
-      "This update may affect business rules, tax, compliance, or planning."
-  };
-
-  return map[category] || map.Business;
-}
 
 const STOP_WORDS = new Set([
   "the",
-  "a",
-  "an",
   "and",
-  "or",
-  "to",
-  "of",
-  "in",
-  "on",
   "for",
   "with",
   "from",
-  "by",
-  "at",
-  "as",
-  "is",
+  "that",
+  "this",
   "are",
   "was",
   "were",
-  "be",
-  "been",
-  "this",
-  "that",
-  "it",
-  "its",
-  "new",
-  "latest",
-  "breaking",
-  "news",
-  "sri",
-  "lanka",
-  "sri lanka",
+  "will",
+  "has",
+  "have",
+  "had",
+  "into",
+  "over",
+  "after",
+  "before",
   "says",
   "said",
-  "will",
-  "after",
-  "over",
-  "into",
-  "more",
-  "about",
-  "ada",
-  "derana",
-  "hiru",
-  "daily",
-  "mirror",
-  "lankadeepa"
+  "sri",
+  "lanka",
+  "lankan",
+  "new",
+  "news",
+  "latest",
+  "update",
+  "report",
+  "reports"
 ]);
 
-function normalizeForMatch(value) {
+function normalizeText(value) {
   return cleanText(value)
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, " ")
@@ -111,43 +45,70 @@ function normalizeForMatch(value) {
 }
 
 function getTitleKeywords(title) {
-  const words = normalizeForMatch(title)
+  return normalizeText(title)
     .split(" ")
-    .map((word) => word.trim())
-    .filter(Boolean)
-    .filter((word) => word.length > 2)
-    .filter((word) => !STOP_WORDS.has(word));
-
-  return Array.from(new Set(words)).slice(0, 18);
+    .filter((word) => word.length >= 4)
+    .filter((word) => !STOP_WORDS.has(word))
+    .slice(0, 14);
 }
 
 function buildStoryKey(title) {
   const keywords = getTitleKeywords(title);
 
   if (keywords.length === 0) {
-    return normalizeForMatch(title).slice(0, 80);
+    return normalizeText(title).slice(0, 80);
   }
 
-  return keywords.sort().slice(0, 12).join("-");
+  return Array.from(new Set(keywords)).sort().join("-");
 }
 
-function getSimilarity(wordsA, wordsB) {
-  const a = new Set(wordsA || []);
-  const b = new Set(wordsB || []);
+function calculateSimilarity(wordsA, wordsB) {
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
 
-  if (a.size === 0 || b.size === 0) return 0;
+  if (setA.size === 0 || setB.size === 0) {
+    return 0;
+  }
 
   let intersection = 0;
 
-  a.forEach((word) => {
-    if (b.has(word)) {
-      intersection++;
+  setA.forEach((word) => {
+    if (setB.has(word)) {
+      intersection += 1;
     }
   });
 
-  const union = new Set([...a, ...b]).size;
+  const union = new Set([...setA, ...setB]).size;
 
   return intersection / union;
+}
+
+function getRssUrl(source) {
+  return normalizeUrl(source.rssUrl || source.url || "");
+}
+
+function getWebsiteUrl(source) {
+  return normalizeUrl(source.websiteUrl || source.sourceUrl || "");
+}
+
+function getSourceName(source) {
+  return cleanText(source.name || source.sourceName || "RSS Source");
+}
+
+function buildSimpleSummary(item) {
+  const summary = cleanText(
+    item.aiSummary ||
+      item.summary ||
+      item.description ||
+      item.contentSnippet ||
+      item.title
+  );
+
+  if (summary.length <= 260) {
+    return summary;
+  }
+
+  return `${summary.slice(0, 260)}...`;
 }
 
 function buildSourcePayload(item, source) {
@@ -166,6 +127,8 @@ function buildSourcePayload(item, source) {
     publishedAt: item.publishedAt || null,
 
     keywordScore: item.keywordScore || 0,
+    aiAnalyzed: item.aiAnalyzed === true,
+    aiConfidence: item.aiConfidence || 0,
     filterReason: item.filterReason || "accepted_by_keyword_filter",
     hits: item.hits || null,
 
@@ -174,22 +137,22 @@ function buildSourcePayload(item, source) {
 }
 
 function buildPrimaryArticlePayload(item, sourcePayload) {
-  const category = item.category || sourcePayload.category || "Business";
-  const summary = buildSimpleSummary(item);
   const articleUrl = normalizeUrl(item.articleUrl);
-  const storyKeywords = getTitleKeywords(item.title);
-  const storyKey = buildStoryKey(item.title);
+  const title = cleanText(item.aiCanonicalTitle || item.title);
+  const storyKeywords = getTitleKeywords(title);
+  const storyKey = buildStoryKey(title);
 
   return {
-    title: cleanText(item.title),
-    originalTitle: cleanText(item.title),
-    headline: cleanText(item.title),
+    title,
+    headline: title,
 
-    summary,
-    description: summary,
+    summary: buildSimpleSummary(item),
+    description: buildSimpleSummary(item),
+    whyItMatters:
+      cleanText(item.whyItMatters) ||
+      "Useful update for Sri Lankan business readers.",
 
-    category,
-    tags: ["SriLanka", category.replace(/\s+/g, ""), "Business"],
+    category: item.category || "Business",
 
     articleUrl,
     url: articleUrl,
@@ -202,149 +165,187 @@ function buildPrimaryArticlePayload(item, sourcePayload) {
     sourceUrl: sourcePayload.sourceUrl,
     rssUrl: sourcePayload.rssUrl,
 
-    sources: [sourcePayload],
     sourceCount: 1,
-    allArticleUrls: [articleUrl],
+    sources: [sourcePayload],
+    allArticleUrls: [articleUrl].filter(Boolean),
 
     storyKey,
     storyKeywords,
 
-    publishedAt: item.publishedAt || null,
-
     keywordScore: item.keywordScore || 0,
-    relevanceScore: item.keywordScore || 0,
-    filterReason: item.filterReason || "accepted_by_keyword_filter",
-    hits: item.hits || null,
+    relevanceScore: item.aiConfidence || item.keywordScore || 0,
 
-    whyItMatters: buildWhyItMatters(item),
-    isEntrepreneurRelevant: true,
-    approvedForSocial: true,
+    aiAnalyzed: item.aiAnalyzed === true,
+    aiConfidence: item.aiConfidence || 0,
+    aiReason: item.aiReason || "",
 
     isTopNews: false,
     priority: 0,
 
+    publishedAt: item.publishedAt || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString()
   };
 }
 
-async function getActiveSources() {
-  const snap = await db.collection("sources").get();
-
-  return snap.docs
-    .map((doc) => ({
-      id: doc.id,
-      ...doc.data()
-    }))
-    .filter((source) => source.active !== false);
-}
-
 async function findArticleByExactUrl(articleUrl) {
-  const finalUrl = normalizeUrl(articleUrl);
+  const url = normalizeUrl(articleUrl);
 
-  if (!finalUrl) return null;
+  if (!url) return null;
 
   const directSnap = await db
     .collection("articles")
-    .where("articleUrl", "==", finalUrl)
+    .where("articleUrl", "==", url)
     .limit(1)
     .get();
 
   if (!directSnap.empty) {
+    const doc = directSnap.docs[0];
+
     return {
-      id: directSnap.docs[0].id,
-      data: directSnap.docs[0].data()
+      id: doc.id,
+      data: doc.data(),
+      matchType: "exact_url"
     };
   }
 
-  const groupedSnap = await db
+  const arraySnap = await db
     .collection("articles")
-    .where("allArticleUrls", "array-contains", finalUrl)
+    .where("allArticleUrls", "array-contains", url)
     .limit(1)
     .get();
 
-  if (!groupedSnap.empty) {
+  if (!arraySnap.empty) {
+    const doc = arraySnap.docs[0];
+
     return {
-      id: groupedSnap.docs[0].id,
-      data: groupedSnap.docs[0].data()
+      id: doc.id,
+      data: doc.data(),
+      matchType: "exact_url_array"
     };
+  }
+
+  return null;
+}
+
+async function findArticleByStoryKey(storyKey) {
+  if (!storyKey) return null;
+
+  const snap = await db
+    .collection("articles")
+    .where("storyKey", "==", storyKey)
+    .limit(1)
+    .get();
+
+  if (snap.empty) return null;
+
+  const doc = snap.docs[0];
+
+  return {
+    id: doc.id,
+    data: doc.data(),
+    matchType: "story_key"
+  };
+}
+
+async function findRecentSimilarStory(item) {
+  const enabled = process.env.ENABLE_RECENT_SIMILARITY_CHECK !== "false";
+
+  if (!enabled) return null;
+
+  const limit = getNumberEnv("RECENT_SIMILARITY_LIMIT", 120);
+  const threshold = Number(process.env.STORY_SIMILARITY_THRESHOLD || 0.55);
+
+  const incomingTitle = item.aiCanonicalTitle || item.title;
+  const incomingKeywords = getTitleKeywords(incomingTitle);
+
+  if (incomingKeywords.length < 3) return null;
+
+  const snap = await db
+    .collection("articles")
+    .orderBy("createdAt", "desc")
+    .limit(limit)
+    .get();
+
+  let bestMatch = null;
+  let bestScore = 0;
+
+  snap.docs.forEach((doc) => {
+    const data = doc.data();
+
+    const existingKeywords = Array.isArray(data.storyKeywords)
+      ? data.storyKeywords
+      : getTitleKeywords(data.title || data.headline || "");
+
+    const score = calculateSimilarity(incomingKeywords, existingKeywords);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = {
+        id: doc.id,
+        data,
+        matchType: "title_similarity",
+        score
+      };
+    }
+  });
+
+  if (bestMatch && bestScore >= threshold) {
+    return bestMatch;
   }
 
   return null;
 }
 
 async function findMatchingStory(item) {
-  const articleUrl = normalizeUrl(item.articleUrl);
-  const exactMatch = await findArticleByExactUrl(articleUrl);
+  const exactMatch = await findArticleByExactUrl(item.articleUrl);
 
-  if (exactMatch) {
-    return {
-      ...exactMatch,
-      matchType: "exact_url"
-    };
-  }
+  if (exactMatch) return exactMatch;
 
-  const storyKey = buildStoryKey(item.title);
+  const title = item.aiCanonicalTitle || item.title;
+  const storyKey = buildStoryKey(title);
 
-  if (storyKey) {
-    const keySnap = await db
-      .collection("articles")
-      .where("storyKey", "==", storyKey)
-      .limit(1)
-      .get();
+  const storyKeyMatch = await findArticleByStoryKey(storyKey);
 
-    if (!keySnap.empty) {
-      return {
-        id: keySnap.docs[0].id,
-        data: keySnap.docs[0].data(),
-        matchType: "story_key"
-      };
-    }
-  }
+  if (storyKeyMatch) return storyKeyMatch;
 
-  const newKeywords = getTitleKeywords(item.title);
+  const similarMatch = await findRecentSimilarStory(item);
 
-  if (newKeywords.length < 4) {
-    return null;
-  }
-
-  const recentSnap = await db
-    .collection("articles")
-    .orderBy("createdAt", "desc")
-    .limit(200)
-    .get();
-
-  let bestMatch = null;
-  let bestScore = 0;
-
-  recentSnap.docs.forEach((doc) => {
-    const data = doc.data();
-    const existingKeywords =
-      Array.isArray(data.storyKeywords) && data.storyKeywords.length
-        ? data.storyKeywords
-        : getTitleKeywords(data.title || data.headline || "");
-
-    const score = getSimilarity(newKeywords, existingKeywords);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = {
-        id: doc.id,
-        data
-      };
-    }
-  });
-
-  if (bestMatch && bestScore >= 0.55) {
-    return {
-      ...bestMatch,
-      matchType: "similar_title",
-      score: bestScore
-    };
-  }
+  if (similarMatch) return similarMatch;
 
   return null;
+}
+
+function normalizeExistingSources(existingData) {
+  if (Array.isArray(existingData.sources) && existingData.sources.length > 0) {
+    return existingData.sources;
+  }
+
+  return [
+    {
+      sourceName: existingData.sourceName || "RSS Source",
+      sourceUrl: existingData.sourceUrl || "",
+      rssUrl: existingData.rssUrl || "",
+      articleUrl: existingData.articleUrl || existingData.url || "",
+      imageUrl: existingData.imageUrl || "",
+      title: existingData.title || existingData.headline || "",
+      description:
+        existingData.summary ||
+        existingData.description ||
+        existingData.whyItMatters ||
+        "",
+      category: existingData.category || "Business",
+      publishedAt: existingData.publishedAt || existingData.createdAt,
+      addedAt: existingData.createdAt || new Date().toISOString()
+    }
+  ];
+}
+
+function mergeUniqueUrls(existingUrls, newUrl) {
+  return Array.from(
+    new Set([...(Array.isArray(existingUrls) ? existingUrls : []), newUrl].filter(Boolean))
+  );
 }
 
 async function mergeArticleIntoExistingStory(existing, item, source) {
@@ -353,26 +354,7 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
   const sourcePayload = buildSourcePayload(item, source);
   const articleUrl = normalizeUrl(item.articleUrl);
 
-  const existingSources = Array.isArray(existingData.sources)
-    ? existingData.sources
-    : [
-        {
-          sourceName: existingData.sourceName || "RSS Source",
-          sourceUrl: existingData.sourceUrl || "",
-          rssUrl: existingData.rssUrl || "",
-          articleUrl: existingData.articleUrl || existingData.url || "",
-          title: existingData.title || existingData.headline || "",
-          description:
-            existingData.summary ||
-            existingData.description ||
-            existingData.whyItMatters ||
-            "",
-          category: existingData.category || "Business",
-          publishedAt: existingData.publishedAt || existingData.createdAt,
-          addedAt: existingData.createdAt || new Date().toISOString()
-        }
-      ];
-
+  const existingSources = normalizeExistingSources(existingData);
   const newSourceName = cleanText(sourcePayload.sourceName).toLowerCase();
 
   const alreadyHasSameUrl = existingSources.some((sourceItem) => {
@@ -381,6 +363,7 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
 
   if (alreadyHasSameUrl) {
     await articleRef.update({
+      allArticleUrls: mergeUniqueUrls(existingData.allArticleUrls, articleUrl),
       lastSeenAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
@@ -402,6 +385,7 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
 
   if (alreadyHasSameSource) {
     await articleRef.update({
+      allArticleUrls: mergeUniqueUrls(existingData.allArticleUrls, articleUrl),
       lastSeenAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
@@ -421,7 +405,7 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
     ? existingData.allArticleUrls
     : [existingData.articleUrl || existingData.url].filter(Boolean);
 
-  const updatedUrls = Array.from(new Set([...existingUrls, articleUrl]));
+  const updatedUrls = Array.from(new Set([...existingUrls, articleUrl].filter(Boolean)));
 
   await articleRef.update({
     sources: updatedSources,
@@ -439,7 +423,13 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
     ),
     relevanceScore: Math.max(
       Number(existingData.relevanceScore || 0),
-      Number(item.keywordScore || 0)
+      Number(item.aiConfidence || item.keywordScore || 0)
+    ),
+
+    aiAnalyzed: existingData.aiAnalyzed || item.aiAnalyzed === true,
+    aiConfidence: Math.max(
+      Number(existingData.aiConfidence || 0),
+      Number(item.aiConfidence || 0)
     ),
 
     updatedAt: new Date().toISOString(),
@@ -455,22 +445,7 @@ async function mergeArticleIntoExistingStory(existing, item, source) {
   };
 }
 
-async function saveAcceptedArticle(item, source) {
-  const articleUrl = normalizeUrl(item.articleUrl);
-
-  if (!item.title || !articleUrl) {
-    return {
-      saved: false,
-      reason: "missing_title_or_url"
-    };
-  }
-
-  const existingStory = await findMatchingStory(item);
-
-  if (existingStory) {
-    return mergeArticleIntoExistingStory(existingStory, item, source);
-  }
-
+async function createNewArticle(item, source) {
   const sourcePayload = buildSourcePayload(item, source);
   const payload = buildPrimaryArticlePayload(item, sourcePayload);
 
@@ -478,206 +453,373 @@ async function saveAcceptedArticle(item, source) {
 
   return {
     saved: true,
-    merged: false,
     duplicate: false,
-    id: ref.id
+    merged: false,
+    id: ref.id,
+    reason: "created_new_article"
   };
 }
 
-async function saveRejectedArticle(item, source) {
-  if (process.env.SAVE_REJECTED_ARTICLES !== "true") {
-    return null;
+async function saveOrMergeArticle(item, source) {
+  const matchingStory = await findMatchingStory(item);
+
+  if (matchingStory) {
+    return mergeArticleIntoExistingStory(matchingStory, item, source);
   }
 
-  const payload = {
+  return createNewArticle(item, source);
+}
+
+async function saveRejectedArticle(item, source, reason) {
+  if (process.env.SAVE_REJECTED_ARTICLES !== "true") {
+    return;
+  }
+
+  await db.collection("rejectedArticles").add({
     title: cleanText(item.title),
     description: cleanText(item.description),
     articleUrl: normalizeUrl(item.articleUrl),
+    imageUrl: normalizeUrl(item.imageUrl || ""),
     sourceName: getSourceName(source),
     rssUrl: getRssUrl(source),
+    category: item.category || "Business",
     keywordScore: item.keywordScore || 0,
-    filterReason: item.filterReason || "rejected_by_keyword_filter",
-    hits: item.hits || null,
+    filterReason: reason || item.filterReason || "rejected",
+    aiAnalyzed: item.aiAnalyzed === true,
+    aiConfidence: item.aiConfidence || 0,
     createdAt: new Date().toISOString()
-  };
-
-  const ref = await db.collection("rejectedArticles").add(payload);
-
-  return ref.id;
+  });
 }
 
-async function updateSourceStatus(sourceId, data) {
-  await db.collection("sources").doc(sourceId).update({
-    ...data,
+function shouldAnalyzeWithOpenAI(item, aiState) {
+  if (!isOpenAiEnabled()) return false;
+
+  const maxCalls = getNumberEnv("MAX_OPENAI_CALLS_PER_RUN", 10);
+
+  if (aiState.calls >= maxCalls) {
+    return false;
+  }
+
+  const score = Number(item.keywordScore || 0);
+  const minScore = getNumberEnv("OPENAI_ANALYZE_MIN_SCORE", 5);
+  const maxScore = getNumberEnv("OPENAI_ANALYZE_MAX_SCORE", 70);
+
+  return score >= minScore && score <= maxScore;
+}
+
+function addUsage(aiState, usage) {
+  if (!usage) return;
+
+  aiState.inputTokens +=
+    Number(usage.input_tokens || usage.prompt_tokens || 0) || 0;
+
+  aiState.outputTokens +=
+    Number(usage.output_tokens || usage.completion_tokens || 0) || 0;
+
+  aiState.totalTokens +=
+    Number(usage.total_tokens || 0) ||
+    Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0) ||
+    0;
+}
+
+async function prepareItemWithOpenAI(item, aiState) {
+  if (!shouldAnalyzeWithOpenAI(item, aiState)) {
+    return {
+      ...item,
+      aiAnalyzed: false,
+      aiSkipped: true
+    };
+  }
+
+  aiState.calls += 1;
+
+  try {
+    const analysis = await analyzeRssNewsItem(item);
+    addUsage(aiState, analysis.usage);
+
+    if (analysis.accepted === false) {
+      return {
+        ...item,
+        accepted: false,
+        aiAnalyzed: true,
+        aiConfidence: analysis.confidence,
+        aiReason: analysis.reason,
+        filterReason: "rejected_by_openai"
+      };
+    }
+
+    return {
+      ...item,
+      accepted: true,
+      aiAnalyzed: true,
+      aiConfidence: analysis.confidence,
+      aiReason: analysis.reason,
+      aiSummary: analysis.summary,
+      summary: analysis.summary,
+      whyItMatters: analysis.whyItMatters,
+      aiCanonicalTitle: analysis.canonicalTitle,
+      category: analysis.category || item.category
+    };
+  } catch (error) {
+    return {
+      ...item,
+      accepted: true,
+      aiAnalyzed: false,
+      aiError: error.message,
+      aiSkipped: true
+    };
+  }
+}
+
+async function resolveSource(sourceOrId) {
+  if (typeof sourceOrId === "string") {
+    const snap = await db.collection("sources").doc(sourceOrId).get();
+
+    if (!snap.exists) {
+      throw new Error("Source not found");
+    }
+
+    return {
+      id: snap.id,
+      ...snap.data()
+    };
+  }
+
+  return sourceOrId;
+}
+
+async function updateSourceStatus(source, update) {
+  if (!source?.id) return;
+
+  await db.collection("sources").doc(source.id).update({
+    ...update,
     updatedAt: new Date().toISOString()
   });
 }
 
-async function createRunLog(data) {
-  const ref = await db.collection("rssRuns").add({
-    ...data,
+async function saveRunLog(payload) {
+  await db.collection("rssRuns").add({
+    ...payload,
     createdAt: new Date().toISOString()
   });
-
-  return ref.id;
 }
 
-async function updateRunLog(runId, data) {
-  if (!runId) return;
-
-  await db.collection("rssRuns").doc(runId).update({
-    ...data,
-    updatedAt: new Date().toISOString()
-  });
-}
-
-async function fetchOneSource(source) {
+async function fetchOneSource(sourceOrId, options = {}) {
+  const source = await resolveSource(sourceOrId);
   const rssUrl = getRssUrl(source);
   const sourceName = getSourceName(source);
 
   if (!rssUrl) {
-    throw new Error("RSS URL missing");
+    throw new Error("Source RSS URL is missing");
   }
 
-  const result = await readAndFilterRssFeed(rssUrl);
+  const aiState =
+    options.aiState || {
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0
+    };
 
   let savedCount = 0;
   let mergedCount = 0;
   let duplicateCount = 0;
   let rejectedCount = 0;
-
-  for (const item of result.acceptedItems) {
-    const saveResult = await saveAcceptedArticle(item, source);
-
-    if (saveResult.saved) {
-      savedCount++;
-    } else if (saveResult.merged) {
-      mergedCount++;
-    } else if (saveResult.duplicate) {
-      duplicateCount++;
-    }
-  }
-
-  for (const item of result.rejectedItems) {
-    await saveRejectedArticle(item, source);
-    rejectedCount++;
-  }
-
-  await updateSourceStatus(source.id, {
-    lastFetchedAt: new Date().toISOString(),
-    lastStatus: "success",
-    lastItemCount: result.checkedItems,
-    lastAcceptedCount: result.acceptedCount,
-    lastRejectedCount: result.rejectedCount,
-    lastSavedCount: savedCount,
-    lastMergedCount: mergedCount,
-    lastDuplicateCount: duplicateCount,
-    lastError: null
-  });
-
-  return {
-    sourceId: source.id,
-    sourceName,
-    rssUrl,
-    checkedItems: result.checkedItems,
-    acceptedCount: result.acceptedCount,
-    rejectedCount,
-    savedCount,
-    mergedCount,
-    duplicateCount
-  };
-}
-
-async function runRssPipeline() {
-  const runId = await createRunLog({
-    type: "manual_rss_run",
-    status: "running",
-    startedAt: new Date().toISOString()
-  });
-
-  let totalSources = 0;
-  let totalChecked = 0;
-  let totalSaved = 0;
-  let totalMerged = 0;
-  let totalRejected = 0;
-  let totalDuplicates = 0;
-  let totalErrors = 0;
+  let openAiRejectedCount = 0;
 
   try {
-    const sources = await getActiveSources();
-    const maxSources = getNumberEnv("MAX_SOURCES_PER_RUN", sources.length);
-    const selectedSources = sources.slice(0, maxSources);
+    const result = await readAndFilterRssFeed(rssUrl);
 
-    totalSources = selectedSources.length;
+    rejectedCount += result.rejectedCount || 0;
 
-    const sourceResults = [];
+    for (const rejectedItem of result.rejectedItems || []) {
+      await saveRejectedArticle(
+        rejectedItem,
+        source,
+        rejectedItem.filterReason || "rejected_by_keyword_filter"
+      );
+    }
 
-    for (const source of selectedSources) {
-      try {
-        const result = await fetchOneSource(source);
+    for (const rawItem of result.acceptedItems || []) {
+      const item = await prepareItemWithOpenAI(
+        {
+          ...rawItem,
+          sourceName
+        },
+        aiState
+      );
 
-        totalChecked += result.checkedItems;
-        totalSaved += result.savedCount;
-        totalMerged += result.mergedCount;
-        totalRejected += result.rejectedCount;
-        totalDuplicates += result.duplicateCount;
+      if (item.accepted === false) {
+        rejectedCount += 1;
+        openAiRejectedCount += 1;
 
-        sourceResults.push(result);
-      } catch (error) {
-        totalErrors++;
+        await saveRejectedArticle(
+          item,
+          source,
+          item.filterReason || "rejected_by_openai"
+        );
 
-        await updateSourceStatus(source.id, {
-          lastStatus: "failed",
-          lastError: error.message,
-          lastErrorAt: new Date().toISOString()
-        });
+        continue;
+      }
 
-        sourceResults.push({
-          sourceId: source.id,
-          sourceName: getSourceName(source),
-          error: error.message
-        });
+      const saveResult = await saveOrMergeArticle(item, source);
+
+      if (saveResult.saved) {
+        savedCount += 1;
+      }
+
+      if (saveResult.merged) {
+        mergedCount += 1;
+      }
+
+      if (saveResult.duplicate) {
+        duplicateCount += 1;
       }
     }
 
-    await updateRunLog(runId, {
-      status: "completed",
-      completedAt: new Date().toISOString(),
-      totalSources,
-      totalChecked,
-      totalSaved,
-      totalMerged,
-      totalRejected,
-      totalDuplicates,
-      totalErrors,
-      sourceResults
+    const finalResult = {
+      sourceId: source.id,
+      sourceName,
+      rssUrl,
+      checkedItems: result.checkedItems || 0,
+      acceptedCount: result.acceptedCount || 0,
+      rejectedCount,
+      savedCount,
+      mergedCount,
+      duplicateCount,
+      openAiEnabled: isOpenAiEnabled(),
+      openAiCalls: aiState.calls,
+      openAiRejectedCount,
+      openAiUsage: {
+        inputTokens: aiState.inputTokens,
+        outputTokens: aiState.outputTokens,
+        totalTokens: aiState.totalTokens
+      }
+    };
+
+    await updateSourceStatus(source, {
+      lastFetchedAt: new Date().toISOString(),
+      lastStatus: "success",
+      lastItemCount: result.checkedItems || 0,
+      lastAcceptedCount: result.acceptedCount || 0,
+      lastRejectedCount: rejectedCount,
+      lastSavedCount: savedCount,
+      lastMergedCount: mergedCount,
+      lastDuplicateCount: duplicateCount,
+      lastOpenAiCalls: aiState.calls,
+      lastError: null
     });
 
-    return {
-      runId,
-      totalSources,
-      totalChecked,
-      totalSaved,
-      totalMerged,
-      totalRejected,
-      totalDuplicates,
-      totalErrors,
-      sourceResults
-    };
+    await saveRunLog({
+      type: "single_source",
+      status: "success",
+      ...finalResult
+    });
+
+    return finalResult;
   } catch (error) {
-    await updateRunLog(runId, {
+    await updateSourceStatus(source, {
+      lastFetchedAt: new Date().toISOString(),
+      lastStatus: "failed",
+      lastError: error.message
+    });
+
+    await saveRunLog({
+      type: "single_source",
       status: "failed",
-      error: error.message,
-      completedAt: new Date().toISOString()
+      sourceId: source.id || null,
+      sourceName,
+      rssUrl,
+      error: error.message
     });
 
     throw error;
   }
 }
 
+async function runRssPipeline() {
+  const maxSources = getNumberEnv("MAX_SOURCES_PER_RUN", 20);
+
+  const snap = await db.collection("sources").get();
+
+  const sources = snap.docs
+    .map((doc) => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    .filter((source) => source.active !== false)
+    .slice(0, maxSources);
+
+  const aiState = {
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0
+  };
+
+  const results = [];
+
+  let totalChecked = 0;
+  let totalAccepted = 0;
+  let totalRejected = 0;
+  let totalSaved = 0;
+  let totalMerged = 0;
+  let totalDuplicates = 0;
+  let failedSources = 0;
+
+  for (const source of sources) {
+    try {
+      const result = await fetchOneSource(source, { aiState });
+
+      results.push(result);
+
+      totalChecked += result.checkedItems || 0;
+      totalAccepted += result.acceptedCount || 0;
+      totalRejected += result.rejectedCount || 0;
+      totalSaved += result.savedCount || 0;
+      totalMerged += result.mergedCount || 0;
+      totalDuplicates += result.duplicateCount || 0;
+    } catch (error) {
+      failedSources += 1;
+
+      results.push({
+        sourceId: source.id,
+        sourceName: getSourceName(source),
+        status: "failed",
+        error: error.message
+      });
+    }
+  }
+
+  const finalResult = {
+    sourceCount: sources.length,
+    failedSources,
+    totalChecked,
+    totalAccepted,
+    totalRejected,
+    totalSaved,
+    totalMerged,
+    totalDuplicates,
+    openAiEnabled: isOpenAiEnabled(),
+    totalOpenAiCalls: aiState.calls,
+    openAiUsage: {
+      inputTokens: aiState.inputTokens,
+      outputTokens: aiState.outputTokens,
+      totalTokens: aiState.totalTokens
+    },
+    results
+  };
+
+  await saveRunLog({
+    type: "all_sources",
+    status: failedSources > 0 ? "completed_with_errors" : "success",
+    ...finalResult
+  });
+
+  return finalResult;
+}
+
 module.exports = {
-  getActiveSources,
   fetchOneSource,
-  runRssPipeline,
-  saveAcceptedArticle
+  runRssPipeline
 };

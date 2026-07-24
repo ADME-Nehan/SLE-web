@@ -12,6 +12,23 @@ const api = axios.create({
   }
 });
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("sle_admin_token");
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
+});
+
+// Auth
+export const adminLogin = (data) => api.post("/auth/login", data);
+export const getAdminMe = () => api.get("/auth/me");
+
+// Dashboard
+export const getDashboardStats = () => api.get("/dashboard/stats");
+
 // News
 export const getNews = (params = {}) => api.get("/news", { params });
 export const getArticleById = (id) => api.get(`/news/${id}`);

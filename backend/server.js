@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const authRoutes = require("./routes/authRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 const rssRoutes = require("./routes/rssRoutes");
 const sourceRoutes = require("./routes/sourceRoutes");
 const newsRoutes = require("./routes/newsRoutes");
@@ -12,9 +14,27 @@ const PORT = process.env.PORT || 5000;
 
 app.disable("x-powered-by");
 
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  process.env.CLIENT_URL
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("CORS blocked:", origin);
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true
   })
 );
@@ -38,6 +58,8 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+app.use("/api/auth", authRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/rss", rssRoutes);
 app.use("/api/sources", sourceRoutes);
 app.use("/api/news", newsRoutes);
@@ -60,6 +82,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 SLE RSS backend running on port ${PORT}`);
+  console.log("✅ Allowed CORS origins:", allowedOrigins);
 
   startScheduler();
 });

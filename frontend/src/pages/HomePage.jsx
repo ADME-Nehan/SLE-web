@@ -97,12 +97,6 @@ export default function HomePage() {
                   "Untitled News"}
               </h1>
 
-              {/* <p>
-                {featuredArticle.summary ||
-                  featuredArticle.description ||
-                  featuredArticle.whyItMatters ||
-                  "Read the latest update."}
-              </p> */}
 
               <span className="sle-featured-read">Open story →</span>
             </a>

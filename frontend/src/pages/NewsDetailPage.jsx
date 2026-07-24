@@ -146,7 +146,7 @@ export default function NewsDetailPage() {
                     className="card source-comparison-card"
                     key={`${source.articleUrl}-${index}`}
                   >
-                    {source.imageUrl ? (
+                    {/* {source.imageUrl ? (
                       <div className="source-comparison-image-wrap">
                         <img
                           src={source.imageUrl}
@@ -159,7 +159,7 @@ export default function NewsDetailPage() {
                           }}
                         />
                       </div>
-                    ) : null}
+                    ) : null} */}
 
                     <div className="source-comparison-top">
                       <span className="source-badge">
