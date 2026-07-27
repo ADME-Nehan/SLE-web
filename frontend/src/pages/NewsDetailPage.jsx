@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import { getArticleById, getApiError } from "../utils/api";
+import {
+  getArticleAiSummary,
+  getArticleById,
+  getApiError
+} from "../utils/api";
 
 function formatDate(value) {
   if (!value) return "";
@@ -50,12 +54,37 @@ export default function NewsDetailPage() {
 
   const [article, setArticle] = useState(null);
   const [sources, setSources] = useState([]);
+  const [aiSummary, setAiSummary] = useState(null);
+
   const [loading, setLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
+
   const [error, setError] = useState("");
+  const [aiError, setAiError] = useState("");
+
+  async function loadAiSummary(articleId, existingSummary = null) {
+    if (existingSummary?.shortSummary) {
+      setAiSummary(existingSummary);
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError("");
+
+    try {
+      const res = await getArticleAiSummary(articleId);
+      setAiSummary(res.data.aiSummary || null);
+    } catch (err) {
+      setAiError(getApiError(err));
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   async function loadArticle() {
     setLoading(true);
     setError("");
+    setAiError("");
 
     try {
       const res = await getArticleById(id);
@@ -64,6 +93,8 @@ export default function NewsDetailPage() {
 
       setArticle(loadedArticle);
       setSources(loadedSources);
+
+      loadAiSummary(loadedArticle.id, loadedArticle.aiDetailSummary);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -101,6 +132,9 @@ export default function NewsDetailPage() {
                     src={mainImage}
                     alt={article.title || "News image"}
                     className="news-detail-main-image"
+                    loading="eager"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
                     onError={(e) => {
                       e.currentTarget.parentElement.style.display = "none";
                     }}
@@ -119,17 +153,81 @@ export default function NewsDetailPage() {
                     : sources[0]?.sourceName}
                 </span>
 
+                <span className="source-badge">
+                  {article.category || "Business"}
+                </span>
+
                 <span>{formatDate(article.createdAt)}</span>
               </div>
 
               <h1>{article.title || article.headline || "Untitled News"}</h1>
 
-              {/* <p>
+              <p>
                 {article.summary ||
                   article.description ||
                   article.whyItMatters ||
                   "This story was collected from RSS sources."}
-              </p> */}
+              </p>
+            </section>
+
+            <section className="card ai-summary-card">
+              <div className="ai-summary-top">
+                <div>
+                  <span className="hero-kicker">AI Summary</span>
+                  <h2>
+                    {aiSummary?.title ||
+                      "Quick summary generated from this news"}
+                  </h2>
+                </div>
+
+                {aiSummary?.readingTime ? (
+                  <span className="source-badge">
+                    {aiSummary.readingTime}
+                  </span>
+                ) : null}
+              </div>
+
+              {aiLoading ? (
+                <div className="ai-summary-loading">
+                  <div className="spinner"></div>
+                  <p>Generating AI summary...</p>
+                </div>
+              ) : aiSummary ? (
+                <>
+                  <p className="ai-summary-text">
+                    {aiSummary.shortSummary}
+                  </p>
+
+                  {Array.isArray(aiSummary.keyPoints) &&
+                  aiSummary.keyPoints.length > 0 ? (
+                    <ul className="ai-summary-points">
+                      {aiSummary.keyPoints.map((point, index) => (
+                        <li key={`${point}-${index}`}>{point}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+
+                  <div className="ai-impact-box">
+                    <strong>Why it matters</strong>
+                    <p>{aiSummary.businessImpact}</p>
+                  </div>
+                </>
+              ) : (
+                <div className="ai-summary-error">
+                  <p>
+                    {aiError ||
+                      "AI summary is not available for this article yet."}
+                  </p>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => loadAiSummary(article.id)}
+                  >
+                    Try Generate Again
+                  </button>
+                </div>
+              )}
             </section>
 
             <section className="source-comparison-section">
@@ -146,20 +244,22 @@ export default function NewsDetailPage() {
                     className="card source-comparison-card"
                     key={`${source.articleUrl}-${index}`}
                   >
-                    {/* {source.imageUrl ? (
+                    {source.imageUrl ? (
                       <div className="source-comparison-image-wrap">
                         <img
                           src={source.imageUrl}
                           alt={source.title || "Source image"}
                           className="source-comparison-image"
                           loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
                           onError={(e) => {
                             e.currentTarget.parentElement.style.display =
                               "none";
                           }}
                         />
                       </div>
-                    ) : null} */}
+                    ) : null}
 
                     <div className="source-comparison-top">
                       <span className="source-badge">

@@ -4,19 +4,69 @@ import NewsCard from "../components/NewsCard";
 import LoadingScreen from "../components/LoadingScreen";
 import { getNews, getApiError } from "../utils/api";
 
-export default function HomePage() {
-  const [articles, setArticles] = useState([]);
-  const [featuredArticle, setFeaturedArticle] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [pageLoader, setPageLoader] = useState(() => {
-    return sessionStorage.getItem("sle_loader_seen") !== "true";
-  });
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
+const CACHE_KEY = "sle_home_articles_cache_v1";
+const FIRST_LOAD_LIMIT = 24;
+const AUTO_REFRESH_MS = 180000;
 
-  async function loadNews(showMainLoading = false) {
-    if (showMainLoading) {
+function readCachedArticles() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+
+    if (Array.isArray(cached.articles)) {
+      return {
+        articles: cached.articles,
+        lastUpdated: cached.lastUpdated || ""
+      };
+    }
+
+    return {
+      articles: [],
+      lastUpdated: ""
+    };
+  } catch {
+    return {
+      articles: [],
+      lastUpdated: ""
+    };
+  }
+}
+
+function saveCachedArticles(articles) {
+  try {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        articles,
+        lastUpdated: new Date().toLocaleTimeString()
+      })
+    );
+  } catch {
+    // Ignore cache storage errors
+  }
+}
+
+export default function HomePage() {
+  const cached = readCachedArticles();
+
+  const [articles, setArticles] = useState(cached.articles);
+  const [featuredArticle, setFeaturedArticle] = useState(
+    cached.articles[0] || null
+  );
+
+  const [loading, setLoading] = useState(cached.articles.length === 0);
+  const [pageLoader, setPageLoader] = useState(() => {
+    const loaderSeen = sessionStorage.getItem("sle_loader_seen") === "true";
+    const hasCache = cached.articles.length > 0;
+
+    return !loaderSeen && !hasCache;
+  });
+
+  const [refreshing, setRefreshing] = useState(cached.articles.length > 0);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(cached.lastUpdated);
+
+  async function loadNews({ showMainLoading = false, signal } = {}) {
+    if (showMainLoading && articles.length === 0) {
       setLoading(true);
     } else {
       setRefreshing(true);
@@ -25,14 +75,32 @@ export default function HomePage() {
     setError("");
 
     try {
-      const res = await getNews({ limit: 60 });
+      const res = await getNews(
+        {
+          limit: FIRST_LOAD_LIMIT
+        },
+        {
+          signal
+        }
+      );
+
       const list = res.data.articles || [];
 
       setArticles(list);
       setFeaturedArticle(list[0] || null);
-      setLastUpdated(new Date().toLocaleTimeString());
+
+      const updatedTime = new Date().toLocaleTimeString();
+      setLastUpdated(updatedTime);
+
+      saveCachedArticles(list);
     } catch (err) {
-      setError(getApiError(err));
+      if (err?.name === "CanceledError" || err?.code === "ERR_CANCELED") {
+        return;
+      }
+
+      if (articles.length === 0) {
+        setError(getApiError(err));
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -40,29 +108,30 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function startPage() {
-      const alreadySeen = sessionStorage.getItem("sle_loader_seen") === "true";
+      await loadNews({
+        showMainLoading: true,
+        signal: controller.signal
+      });
 
-      await loadNews(true);
-
-      if (alreadySeen) {
-        setPageLoader(false);
-        return;
-      }
-
-      setTimeout(() => {
-        sessionStorage.setItem("sle_loader_seen", "true");
-        setPageLoader(false);
-      }, 1200);
+      sessionStorage.setItem("sle_loader_seen", "true");
+      setPageLoader(false);
     }
 
     startPage();
 
     const interval = setInterval(() => {
-      loadNews(false);
-    }, 60000);
+      loadNews({
+        showMainLoading: false
+      });
+    }, AUTO_REFRESH_MS);
 
-    return () => clearInterval(interval);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, []);
 
   if (pageLoader) {
@@ -80,6 +149,23 @@ export default function HomePage() {
               href={`/news/${featuredArticle.id}`}
               className="card sle-featured-card"
             >
+              {featuredArticle.imageUrl ? (
+                <div className="sle-featured-image-wrap">
+                  <img
+                    src={featuredArticle.imageUrl}
+                    alt={featuredArticle.title || "Featured news"}
+                    className="sle-featured-image"
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.parentElement.style.display = "none";
+                    }}
+                  />
+                </div>
+              ) : null}
+
               <div className="source-badge">
                 {(featuredArticle.sourceCount ||
                   featuredArticle.sources?.length ||
@@ -97,9 +183,16 @@ export default function HomePage() {
                   "Untitled News"}
               </h1>
 
+              <p>
+                {featuredArticle.summary ||
+                  featuredArticle.description ||
+                  featuredArticle.whyItMatters ||
+                  "Read the latest update."}
+              </p>
 
               <span className="sle-featured-read">Open story →</span>
             </a>
+
           </section>
         ) : null}
 
@@ -108,6 +201,15 @@ export default function HomePage() {
             <span>Latest</span>
             <h2>News Feed</h2>
           </div>
+
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => loadNews({ showMainLoading: false })}
+            disabled={refreshing}
+          >
+            {refreshing ? "Updating..." : "Update"}
+          </button>
         </section>
 
         {loading ? (

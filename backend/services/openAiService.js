@@ -24,6 +24,13 @@ function isOpenAiEnabled() {
   );
 }
 
+function isAiDetailSummaryEnabled() {
+  return (
+    process.env.ENABLE_AI_DETAIL_SUMMARY === "true" &&
+    Boolean(process.env.OPENAI_API_KEY)
+  );
+}
+
 async function getClient() {
   if (openAiClient) return openAiClient;
 
@@ -92,8 +99,7 @@ function normalizeAnalysis(parsed, item) {
     whyItMatters:
       cleanText(parsed.whyItMatters) ||
       "Useful update for Sri Lankan business readers.",
-    canonicalTitle:
-      cleanText(parsed.canonicalTitle) || cleanText(item.title),
+    canonicalTitle: cleanText(parsed.canonicalTitle) || cleanText(item.title),
     reason:
       cleanText(parsed.reason) ||
       (accepted ? "accepted_by_openai" : "rejected_by_openai")
@@ -215,7 +221,148 @@ async function analyzeRssNewsItem(item) {
   };
 }
 
+function normalizeSourcesForPrompt(article) {
+  if (Array.isArray(article.sources) && article.sources.length > 0) {
+    return article.sources.slice(0, 4).map((source) => ({
+      sourceName: cleanText(source.sourceName || "RSS Source"),
+      title: limitText(source.title || article.title || "", 160),
+      description: limitText(
+        source.description || article.summary || article.description || "",
+        getNumberEnv("AI_DETAIL_SUMMARY_MAX_SOURCE_CHARS", 700)
+      )
+    }));
+  }
+
+  return [
+    {
+      sourceName: cleanText(article.sourceName || "RSS Source"),
+      title: limitText(article.title || article.headline || "", 160),
+      description: limitText(
+        article.summary || article.description || article.whyItMatters || "",
+        getNumberEnv("AI_DETAIL_SUMMARY_MAX_SOURCE_CHARS", 700)
+      )
+    }
+  ];
+}
+
+function normalizeDetailSummary(parsed) {
+  const keyPoints = Array.isArray(parsed.keyPoints)
+    ? parsed.keyPoints.map((point) => cleanText(point)).filter(Boolean).slice(0, 4)
+    : [];
+
+  return {
+    label: "AI Summary",
+    title: cleanText(parsed.title) || "AI summary",
+    shortSummary: cleanText(parsed.shortSummary),
+    keyPoints,
+    businessImpact:
+      cleanText(parsed.businessImpact) ||
+      "This update may be useful for business readers.",
+    readingTime: cleanText(parsed.readingTime) || "1 min read"
+  };
+}
+
+async function generateArticleDetailSummary(article) {
+  if (!isAiDetailSummaryEnabled()) {
+    throw new Error("AI detail summary is disabled or OPENAI_API_KEY is missing");
+  }
+
+  const client = await getClient();
+
+  const maxOutputTokens = getNumberEnv("AI_DETAIL_SUMMARY_MAX_OUTPUT_TOKENS", 220);
+
+  const payload = {
+    title: limitText(article.title || article.headline || "", 180),
+    category: article.category || "Business",
+    sourceCount: article.sourceCount || article.sources?.length || 1,
+    summary: limitText(
+      article.summary || article.description || article.whyItMatters || "",
+      500
+    ),
+    sources: normalizeSourcesForPrompt(article)
+  };
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: {
+        type: "string"
+      },
+      shortSummary: {
+        type: "string"
+      },
+      keyPoints: {
+        type: "array",
+        items: {
+          type: "string"
+        }
+      },
+      businessImpact: {
+        type: "string"
+      },
+      readingTime: {
+        type: "string"
+      }
+    },
+    required: [
+      "title",
+      "shortSummary",
+      "keyPoints",
+      "businessImpact",
+      "readingTime"
+    ]
+  };
+
+  const response = await client.responses.create({
+    model:
+      process.env.AI_DETAIL_SUMMARY_MODEL ||
+      process.env.OPENAI_MODEL ||
+      "gpt-4o-mini",
+    store: false,
+    max_output_tokens: maxOutputTokens,
+    input: [
+      {
+        role: "system",
+        content:
+          "Create a concise AI summary for a Sri Lankan entrepreneur news website. Do not copy full article text. Use only the provided title, summary, and RSS source snippets. Keep it short, useful, and business-focused."
+      },
+      {
+        role: "user",
+        content: JSON.stringify(payload)
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "article_detail_ai_summary",
+        strict: true,
+        schema
+      }
+    }
+  });
+
+  const outputText = cleanText(response.output_text || "");
+  const parsed = safeJsonParse(outputText);
+
+  if (!parsed) {
+    throw new Error("AI summary response was not valid JSON");
+  }
+
+  return {
+    ...normalizeDetailSummary(parsed),
+    usage: response.usage || null,
+    model:
+      process.env.AI_DETAIL_SUMMARY_MODEL ||
+      process.env.OPENAI_MODEL ||
+      "gpt-4o-mini",
+    generatedAt: new Date().toISOString()
+  };
+}
+
 module.exports = {
   analyzeRssNewsItem,
-  isOpenAiEnabled
+  generateArticleDetailSummary,
+  isOpenAiEnabled,
+  isAiDetailSummaryEnabled
 };

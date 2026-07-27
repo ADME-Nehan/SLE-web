@@ -55,6 +55,8 @@ export default function NewsCard({ article }) {
             alt={article.title || "News image"}
             className="sle-news-image"
             loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
             onError={(e) => {
               e.currentTarget.parentElement.style.display = "none";
             }}

@@ -1,5 +1,11 @@
 const express = require("express");
 const { db } = require("../config/firebase");
+const { cleanText } = require("../utils/helpers");
+const { requireAdmin } = require("../middleware/authMiddleware");
+const {
+  generateArticleDetailSummary,
+  isAiDetailSummaryEnabled
+} = require("../services/openAiService");
 
 const router = express.Router();
 
@@ -22,19 +28,13 @@ function normalizeText(value) {
     .trim();
 }
 
-function getDuplicateKey(article) {
-  const title = normalizeText(article.title || article.headline || "");
-
-  if (article.storyKey) {
-    return article.storyKey;
-  }
-
-  return title;
-}
-
 function normalizeUrl(value) {
   try {
-    const url = new URL(String(value || "").trim());
+    const raw = String(value || "").trim();
+
+    if (!raw) return "";
+
+    const url = new URL(raw);
 
     url.hash = "";
 
@@ -62,6 +62,14 @@ function normalizeUrl(value) {
   }
 }
 
+function getDuplicateKey(article) {
+  if (article.storyKey) {
+    return article.storyKey;
+  }
+
+  return normalizeText(article.title || article.headline || "");
+}
+
 function normalizeSources(article) {
   if (Array.isArray(article.sources) && article.sources.length > 0) {
     return article.sources;
@@ -73,6 +81,7 @@ function normalizeSources(article) {
       sourceUrl: article.sourceUrl || "",
       rssUrl: article.rssUrl || "",
       articleUrl: article.articleUrl || article.url || "",
+      imageUrl: article.imageUrl || "",
       title: article.title || article.headline || "Untitled News",
       description:
         article.summary ||
@@ -96,11 +105,31 @@ function mergeSources(existingSources, newSources) {
     const key = `${sourceName.toLowerCase()}-${articleUrl || title}`;
 
     if (!map.has(key)) {
-      map.set(key, source);
+      map.set(key, {
+        sourceName,
+        sourceUrl: source.sourceUrl || "",
+        rssUrl: source.rssUrl || "",
+        articleUrl: source.articleUrl || "",
+        imageUrl: source.imageUrl || "",
+        title: source.title || "",
+        description: source.description || "",
+        category: source.category || "",
+        publishedAt: source.publishedAt || "",
+        addedAt: source.addedAt || ""
+      });
     }
   });
 
   return Array.from(map.values());
+}
+
+function getBestImage(existing, incoming, sources) {
+  if (existing.imageUrl) return existing.imageUrl;
+  if (incoming.imageUrl) return incoming.imageUrl;
+
+  const sourceWithImage = sources.find((source) => source.imageUrl);
+
+  return sourceWithImage?.imageUrl || "";
 }
 
 function mergeDuplicateArticles(existing, incoming) {
@@ -111,11 +140,23 @@ function mergeDuplicateArticles(existing, incoming) {
   const existingPriority = Number(existing.priority || 0);
   const incomingPriority = Number(incoming.priority || 0);
 
+  const mergedImageUrl = getBestImage(existing, incoming, mergedSources);
+
   return {
     ...existing,
 
     isTopNews: existing.isTopNews || incoming.isTopNews || false,
     priority: Math.max(existingPriority, incomingPriority),
+
+    category: existing.category || incoming.category || "Business",
+
+    imageUrl: mergedImageUrl,
+    imageSourceName:
+      existing.imageSourceName ||
+      incoming.imageSourceName ||
+      mergedSources.find((source) => source.imageUrl === mergedImageUrl)
+        ?.sourceName ||
+      "",
 
     sources: mergedSources,
     sourceCount: mergedSources.length,
@@ -129,6 +170,12 @@ function mergeDuplicateArticles(existing, incoming) {
           ? incoming.allArticleUrls
           : [incoming.articleUrl || incoming.url].filter(Boolean))
       ])
+    ),
+
+    aiAnalyzed: existing.aiAnalyzed || incoming.aiAnalyzed || false,
+    aiConfidence: Math.max(
+      Number(existing.aiConfidence || 0),
+      Number(incoming.aiConfidence || 0)
     ),
 
     updatedAt: existing.updatedAt || incoming.updatedAt,
@@ -181,7 +228,7 @@ router.get("/", async (req, res) => {
     const snap = await db
       .collection("articles")
       .orderBy("createdAt", "desc")
-      .limit(250)
+      .limit(120)
       .get();
 
     let articles = snap.docs.map((doc) => ({
@@ -230,6 +277,75 @@ router.get("/categories", async (req, res) => {
   }
 });
 
+router.get("/:id/ai-summary", async (req, res) => {
+  try {
+    const ref = db.collection("articles").doc(req.params.id);
+    const snap = await ref.get();
+
+    if (!snap.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Article not found"
+      });
+    }
+
+    const article = {
+      id: snap.id,
+      ...snap.data()
+    };
+
+    if (article.aiDetailSummary?.shortSummary) {
+      return res.json({
+        success: true,
+        cached: true,
+        aiSummary: article.aiDetailSummary
+      });
+    }
+
+    if (!isAiDetailSummaryEnabled()) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "AI summary is disabled. Add OPENAI_API_KEY and set ENABLE_AI_DETAIL_SUMMARY=true"
+      });
+    }
+
+    const aiSummary = await generateArticleDetailSummary(article);
+
+    const cleanAiSummary = {
+      label: aiSummary.label || "AI Summary",
+      title: cleanText(aiSummary.title) || "AI summary",
+      shortSummary: cleanText(aiSummary.shortSummary),
+      keyPoints: Array.isArray(aiSummary.keyPoints)
+        ? aiSummary.keyPoints.map((point) => cleanText(point)).filter(Boolean)
+        : [],
+      businessImpact:
+        cleanText(aiSummary.businessImpact) ||
+        "This update may be useful for business readers.",
+      readingTime: cleanText(aiSummary.readingTime) || "1 min read",
+      model: aiSummary.model || process.env.AI_DETAIL_SUMMARY_MODEL || "",
+      generatedAt: aiSummary.generatedAt || new Date().toISOString()
+    };
+
+    await ref.update({
+      aiDetailSummary: cleanAiSummary,
+      aiDetailSummaryUsage: aiSummary.usage || null,
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({
+      success: true,
+      cached: false,
+      aiSummary: cleanAiSummary
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const snap = await db.collection("articles").doc(req.params.id).get();
@@ -256,7 +372,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.put("/:id/priority", async (req, res) => {
+router.put("/:id/priority", requireAdmin, async (req, res) => {
   try {
     const isTopNews = req.body.isTopNews === true;
     const priority = Number(req.body.priority || 0);
@@ -282,7 +398,7 @@ router.put("/:id/priority", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     await db.collection("articles").doc(req.params.id).delete();
 
