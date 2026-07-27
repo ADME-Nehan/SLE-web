@@ -218,14 +218,6 @@ export default function NewsDetailPage() {
                     {aiError ||
                       "AI summary is not available for this article yet."}
                   </p>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => loadAiSummary(article.id)}
-                  >
-                    Try Generate Again
-                  </button>
                 </div>
               )}
             </section>
@@ -244,22 +236,7 @@ export default function NewsDetailPage() {
                     className="card source-comparison-card"
                     key={`${source.articleUrl}-${index}`}
                   >
-                    {source.imageUrl ? (
-                      <div className="source-comparison-image-wrap">
-                        <img
-                          src={source.imageUrl}
-                          alt={source.title || "Source image"}
-                          className="source-comparison-image"
-                          loading="lazy"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            e.currentTarget.parentElement.style.display =
-                              "none";
-                          }}
-                        />
-                      </div>
-                    ) : null}
+                    
 
                     <div className="source-comparison-top">
                       <span className="source-badge">
