@@ -6,53 +6,28 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sle-navbar">
-      <div className="sle-navbar-inner">
-        <Link to="/" className="sle-navbar-logo">
+    <header className="mag-navbar">
+      <div className="mag-navbar-inner">
+        <div className="mag-navbar-left">
+          <button
+            type="button"
+            className="mag-icon-btn"
+            aria-label="Search"
+          >
+            ⌕
+          </button>
+
+
+        </div>
+
+        <Link to="/" className="mag-logo">
           <img
             src="/logo.svg"
             alt="Sri Lankan Entrepreneur"
-            className="sle-navbar-logo-img"
+            className="mag-logo-img"
           />
         </Link>
 
-        <button
-          type="button"
-          className="sle-navbar-menu-btn"
-          onClick={() => setOpen((prev) => !prev)}
-          aria-label="Toggle menu"
-        >
-          ☰
-        </button>
-
-        <div className={`sle-navbar-content ${open ? "open" : ""}`}>
-          <nav className="sle-navbar-links">
-            <Link
-              to="/"
-              className={`sle-nav-link ${
-                location.pathname === "/" ? "sle-nav-link-active" : ""
-              }`}
-              onClick={() => setOpen(false)}
-            >
-              Home
-            </Link>
-
-            <Link>
-              Blog
-            </Link>
-          </nav>
-
-          <div className="sle-navbar-search">
-            <div className="sle-navbar-search-box">
-              <span className="sle-navbar-search-icon">⌕</span>
-              <input
-                className="sle-navbar-search-input"
-                type="text"
-                placeholder="Search latest updates..."
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </header>
   );
