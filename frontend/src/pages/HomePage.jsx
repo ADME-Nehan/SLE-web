@@ -167,7 +167,7 @@ function CompactArticleCard({ article }) {
       <div className="mag-compact-body">
         <span className="mag-category-pill">{article.category || "Business"}</span>
         <h3>{article.title || article.headline || "Untitled News"}</h3>
-        <p>{getSummary(article)}</p>
+       
 
         <div className="mag-story-meta">
           <span>{getSourceName(article)}</span>
@@ -374,9 +374,6 @@ export default function HomePage() {
                         featuredArticle.headline ||
                         "Untitled News"}
                     </h1>
-
-                    <p>{getSummary(featuredArticle)}</p>
-
                     <strong className="mag-read-more">read more</strong>
                   </Link>
                 ) : null}

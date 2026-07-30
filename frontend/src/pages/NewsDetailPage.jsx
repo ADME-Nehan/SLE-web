@@ -162,12 +162,6 @@ export default function NewsDetailPage() {
 
               <h1>{article.title || article.headline || "Untitled News"}</h1>
 
-              <p>
-                {article.summary ||
-                  article.description ||
-                  article.whyItMatters ||
-                  "This story was collected from RSS sources."}
-              </p>
             </section>
 
             <section className="card ai-summary-card">

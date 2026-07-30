@@ -76,7 +76,7 @@ export default function NewsCard({ article }) {
 
       <h2>{article.title || article.headline || "Untitled News"}</h2>
 
-      {/* <p>{getSummary(article)}</p> */}
+      
 
       <div className="sle-news-card-bottom">
         <span className="source-badge">
