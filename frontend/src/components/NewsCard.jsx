@@ -18,15 +18,6 @@ function formatDate(value) {
   }
 }
 
-function getSummary(article) {
-  return (
-    article?.summary ||
-    article?.description ||
-    article?.whyItMatters ||
-    "Read the latest update from Sri Lankan Entrepreneur."
-  );
-}
-
 function getImageUrl(article) {
   if (article?.imageUrl) return article.imageUrl;
 

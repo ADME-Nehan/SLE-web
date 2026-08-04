@@ -101,11 +101,7 @@ function getSourceName(article) {
   return article.sourceName || article.sources?.[0]?.sourceName || "RSS Source";
 }
 
-function getAuthorName(article) {
-  return article.sourceName || article.sources?.[0]?.sourceName || "SLE News";
-}
-
-function SmallStoryCard({ article }) {
+function SmallStoryCard({ article, index }) {
   const imageUrl = getImageUrl(article);
 
   return (
@@ -131,6 +127,7 @@ function SmallStoryCard({ article }) {
       )}
 
       <div className="mag-small-story-content">
+        <span className="mag-story-index">0{index + 1}</span>
         <h3>{article.title || article.headline || "Untitled News"}</h3>
 
         <div className="mag-story-meta">
@@ -185,12 +182,7 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState("Top News");
 
   const [loading, setLoading] = useState(cached.articles.length === 0);
-  const [pageLoader, setPageLoader] = useState(() => {
-    const loaderSeen = sessionStorage.getItem("sle_loader_seen") === "true";
-    const hasCache = cached.articles.length > 0;
-
-    return !loaderSeen && !hasCache;
-  });
+  const [pageLoader, setPageLoader] = useState(true);
 
   const [refreshing, setRefreshing] = useState(cached.articles.length > 0);
   const [error, setError] = useState("");
@@ -209,24 +201,6 @@ export default function HomePage() {
   const featuredArticle = filteredArticles[0] || articles[0] || null;
   const sideStories = filteredArticles.slice(1, 4);
   const latestGrid = filteredArticles.slice(4, 16);
-
-  const trendingSources = useMemo(() => {
-    const map = new Map();
-
-    articles.forEach((article) => {
-      const name = getAuthorName(article);
-
-      map.set(name, (map.get(name) || 0) + 1);
-    });
-
-    return Array.from(map.entries())
-      .map(([name, count]) => ({
-        name,
-        count
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 4);
-  }, [articles]);
 
   async function loadNews({ showMainLoading = false, signal } = {}) {
     if (showMainLoading && articles.length === 0) {
@@ -271,18 +245,14 @@ export default function HomePage() {
 
   useEffect(() => {
     const controller = new AbortController();
-
-    async function startPage() {
-      await loadNews({
-        showMainLoading: true,
-        signal: controller.signal
-      });
-
-      sessionStorage.setItem("sle_loader_seen", "true");
+    const loaderTimer = window.setTimeout(() => {
       setPageLoader(false);
-    }
+    }, 950);
 
-    startPage();
+    loadNews({
+      showMainLoading: true,
+      signal: controller.signal
+    });
 
     const interval = setInterval(() => {
       loadNews({
@@ -292,6 +262,7 @@ export default function HomePage() {
 
     return () => {
       controller.abort();
+      window.clearTimeout(loaderTimer);
       clearInterval(interval);
     };
   }, []);
@@ -305,6 +276,17 @@ export default function HomePage() {
       <Navbar />
 
       <main className="mag-main">
+        <section className="mag-intro">
+          <div>
+            <span className="mag-eyebrow">Curated for entrepreneurs</span>
+            <h1>One place for the news that moves business forward.</h1>
+          </div>
+          <p>
+            Essential reporting from trusted sources—filtered for founders,
+            business leaders and the people building what comes next.
+          </p>
+        </section>
+
         <section className="mag-category-nav">
           {CATEGORY_TABS.map((category) => (
             <button
@@ -339,6 +321,7 @@ export default function HomePage() {
                   <Link to={`/news/${featuredArticle.id}`}>
                     {getImageUrl(featuredArticle) ? (
                       <div className="mag-featured-image-wrap">
+                        <span className="mag-featured-label">Lead story</span>
                         <img
                           src={getImageUrl(featuredArticle)}
                           alt={featuredArticle.title || "Featured news"}
@@ -374,36 +357,19 @@ export default function HomePage() {
                         featuredArticle.headline ||
                         "Untitled News"}
                     </h1>
-                    <strong className="mag-read-more">read more</strong>
+                    <p>{getSummary(featuredArticle)}</p>
+                    <strong className="mag-read-more">
+                      Read the full story <span>→</span>
+                    </strong>
                   </Link>
                 ) : null}
               </article>
 
               <aside className="mag-side-column">
-                {sideStories.map((article) => (
-                  <SmallStoryCard key={article.id} article={article} />
+                {sideStories.map((article, index) => (
+                  <SmallStoryCard key={article.id} article={article} index={index} />
                 ))}
 
-                <div className="mag-trending-authors">
-                  <h2>Trending sources</h2>
-
-                  <div className="mag-author-list">
-                    {trendingSources.map((source) => (
-                      <div className="mag-author" key={source.name}>
-                        <div className="mag-author-avatar">
-                          {source.name.slice(0, 1).toUpperCase()}
-                        </div>
-
-                        <div>
-                          <strong>{source.name}</strong>
-                          <span>{source.count} articles</span>
-                        </div>
-
-                        <small>↗</small>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </aside>
             </section>
 
@@ -413,6 +379,9 @@ export default function HomePage() {
                   <span>Latest</span>
                   <h2>{activeTab} Updates</h2>
                 </div>
+                <span className="mag-section-count">
+                  {filteredArticles.length} stories
+                </span>
               </div>
 
               <div className="mag-compact-grid">
@@ -425,7 +394,8 @@ export default function HomePage() {
         )}
 
         <div className="mag-last-updated">
-          Last updated: {lastUpdated || "-"}
+          <span className={refreshing ? "refresh-pulse active" : "refresh-pulse"} />
+          {refreshing ? "Refreshing briefing" : `Last updated: ${lastUpdated || "-"}`}
         </div>
       </main>
     </div>
