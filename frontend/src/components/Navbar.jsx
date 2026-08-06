@@ -1,9 +1,6 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function Navbar() {
-  const location = useLocation();
-  const isAdmin = location.pathname.startsWith("/admin");
-
   return (
     <header className="mag-navbar">
       <div className="mag-navbar-inner">

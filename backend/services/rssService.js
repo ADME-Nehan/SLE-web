@@ -3,8 +3,22 @@ const axios = require("axios");
 const { cleanText, normalizeUrl, getNumberEnv } = require("../utils/helpers");
 const { filterRssItem } = require("../utils/keywordFilter");
 
+function boundedTimeout(envName, fallback) {
+  const configured = Number(process.env[envName] || fallback);
+  const safeValue =
+    Number.isFinite(configured) && configured > 0 ? configured : fallback;
+
+  return Math.min(safeValue, 8000);
+}
+
+const REQUEST_TIMEOUT_MS = boundedTimeout("RSS_REQUEST_TIMEOUT_MS", 8000);
+const IMAGE_LOOKUP_TIMEOUT_MS = boundedTimeout(
+  "IMAGE_LOOKUP_TIMEOUT_MS",
+  5000
+);
+
 const parser = new Parser({
-  timeout: 20000,
+  timeout: REQUEST_TIMEOUT_MS,
   customFields: {
     item: [
       ["media:content", "mediaContent", { keepArray: true }],
@@ -155,7 +169,7 @@ async function extractArticleMetaImage(articleUrl) {
 
   try {
     const response = await axios.get(articleUrl, {
-      timeout: Number(process.env.IMAGE_LOOKUP_TIMEOUT_MS || 8000),
+      timeout: IMAGE_LOOKUP_TIMEOUT_MS,
       maxRedirects: 5,
       responseType: "text",
       validateStatus: (status) => status >= 200 && status < 400,
@@ -163,7 +177,11 @@ async function extractArticleMetaImage(articleUrl) {
     });
 
     return extractImageFromHtml(response.data, articleUrl);
-  } catch {
+  } catch (error) {
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      console.warn(`[RSS image] timeout: ${articleUrl}`);
+    }
+
     return "";
   }
 }
@@ -221,6 +239,59 @@ function looksLikeRss(value) {
   );
 }
 
+function looksBlockedPage(value) {
+  const text = String(value || "").trim().toLowerCase();
+
+  return (
+    text.includes("cloudflare") ||
+    text.includes("access denied") ||
+    text.includes("forbidden") ||
+    text.includes("attention required")
+  );
+}
+
+function classifyRssError(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  if (
+    error?.code === "RSS_TIMEOUT" ||
+    error?.code === "ECONNABORTED" ||
+    error?.code === "ETIMEDOUT" ||
+    /timed?\s*out|timeout/.test(message)
+  ) {
+    return {
+      sourceStatus: "timeout",
+      message: "RSS source timed out. The website may be blocking requests."
+    };
+  }
+
+  if (message.includes("returned html") || message.includes("not rss xml")) {
+    return {
+      sourceStatus: "invalid_html",
+      message:
+        "This URL returned HTML, not RSS XML. Use a direct RSS XML feed URL."
+    };
+  }
+
+  if (
+    message.includes("403") ||
+    message.includes("blocking") ||
+    message.includes("blocked") ||
+    message.includes("access denied") ||
+    message.includes("forbidden")
+  ) {
+    return {
+      sourceStatus: "blocked",
+      message: "Invalid RSS/Atom feed URL."
+    };
+  }
+
+  return {
+    sourceStatus: "failed",
+    message: "Invalid RSS/Atom feed URL."
+  };
+}
+
 async function downloadFeedXml(rssUrl) {
   const finalRssUrl = normalizeUrl(rssUrl);
 
@@ -230,7 +301,7 @@ async function downloadFeedXml(rssUrl) {
 
   try {
     const response = await axios.get(finalRssUrl, {
-      timeout: 20000,
+      timeout: REQUEST_TIMEOUT_MS,
       maxRedirects: 5,
       responseType: "text",
       validateStatus: () => true,
@@ -259,6 +330,14 @@ async function downloadFeedXml(rssUrl) {
 
     const xml = String(response.data || "");
 
+    if (looksBlockedPage(xml)) {
+      const blockedError = new Error(
+        "RSS source request was blocked by the website."
+      );
+      blockedError.code = "RSS_BLOCKED";
+      throw blockedError;
+    }
+
     if (looksLikeHtml(xml)) {
       throw new Error(
         "This URL returned HTML, not RSS XML. Use a direct RSS XML feed URL."
@@ -274,7 +353,46 @@ async function downloadFeedXml(rssUrl) {
       xml
     };
   } catch (error) {
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      const timeoutError = new Error(
+        `RSS request timed out after ${REQUEST_TIMEOUT_MS}ms`
+      );
+      timeoutError.code = "RSS_TIMEOUT";
+      throw timeoutError;
+    }
+
     throw new Error(error.message || "Failed to download RSS feed");
+  }
+}
+
+async function validateRssSource(rssUrl) {
+  const normalizedUrl = normalizeUrl(rssUrl);
+
+  if (!normalizedUrl) {
+    const error = new Error("RSS URL is required.");
+    error.code = "RSS_URL_REQUIRED";
+    error.sourceStatus = "failed";
+    throw error;
+  }
+
+  try {
+    const result = await downloadFeedXml(normalizedUrl);
+
+    return {
+      valid: true,
+      rssUrl: result.url,
+      type: String(result.xml || "").toLowerCase().includes("<feed")
+        ? "atom"
+        : "rss",
+      sourceStatus: "active",
+      checkedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    const classified = classifyRssError(error);
+    const validationError = new Error(classified.message);
+    validationError.code = error.code || "RSS_VALIDATION_FAILED";
+    validationError.sourceStatus = classified.sourceStatus;
+    throw validationError;
   }
 }
 
@@ -343,5 +461,7 @@ async function readAndFilterRssFeed(rssUrl) {
 
 module.exports = {
   readRssFeed,
-  readAndFilterRssFeed
+  readAndFilterRssFeed,
+  validateRssSource,
+  classifyRssError
 };

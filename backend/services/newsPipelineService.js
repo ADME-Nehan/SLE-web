@@ -1,5 +1,8 @@
 const { db } = require("../config/firebase");
-const { readAndFilterRssFeed } = require("./rssService");
+const {
+  readAndFilterRssFeed,
+  classifyRssError
+} = require("./rssService");
 const { analyzeRssNewsItem, isOpenAiEnabled } = require("./openAiService");
 const { cleanText, normalizeUrl, getNumberEnv } = require("../utils/helpers");
 
@@ -613,6 +616,14 @@ async function fetchOneSource(sourceOrId, options = {}) {
     throw new Error("Source RSS URL is missing");
   }
 
+  if (source.active !== true || source.sourceStatus !== "active") {
+    const inactiveError = new Error(
+      "Source is not active. Validate and enable it before fetching."
+    );
+    inactiveError.code = "SOURCE_INACTIVE";
+    throw inactiveError;
+  }
+
   const aiState =
     options.aiState || {
       calls: 0,
@@ -626,6 +637,8 @@ async function fetchOneSource(sourceOrId, options = {}) {
   let duplicateCount = 0;
   let rejectedCount = 0;
   let openAiRejectedCount = 0;
+
+  console.log(`[RSS] source started: ${sourceName}`);
 
   try {
     const result = await readAndFilterRssFeed(rssUrl);
@@ -698,8 +711,12 @@ async function fetchOneSource(sourceOrId, options = {}) {
     };
 
     await updateSourceStatus(source, {
+      active: true,
+      sourceStatus: "active",
       lastFetchedAt: new Date().toISOString(),
+      lastCheckedAt: new Date().toISOString(),
       lastStatus: "success",
+      failureCount: 0,
       lastItemCount: result.checkedItems || 0,
       lastAcceptedCount: result.acceptedCount || 0,
       lastRejectedCount: rejectedCount,
@@ -716,12 +733,36 @@ async function fetchOneSource(sourceOrId, options = {}) {
       ...finalResult
     });
 
+    console.log(
+      `[RSS] source completed: ${sourceName}; saved=${savedCount}; merged=${mergedCount}; duplicates=${duplicateCount}`
+    );
+
     return finalResult;
   } catch (error) {
+    const timedOut =
+      error.code === "RSS_TIMEOUT" ||
+      error.code === "ECONNABORTED" ||
+      error.code === "ETIMEDOUT" ||
+      /timed?\s*out|timeout/i.test(error.message || "");
+
+    if (timedOut) {
+      console.warn(`[RSS] timeout: ${sourceName}; ${error.message}`);
+    }
+
+    console.error(`[RSS] source failed: ${sourceName}; ${error.message}`);
+
+    const classified = classifyRssError(error);
+    const failureCount = Number(source.failureCount || 0) + 1;
+    const disabled = failureCount >= 3;
+
     await updateSourceStatus(source, {
+      active: disabled ? false : source.active === true,
+      sourceStatus: disabled ? "disabled" : classified.sourceStatus,
       lastFetchedAt: new Date().toISOString(),
-      lastStatus: "failed",
-      lastError: error.message
+      lastCheckedAt: new Date().toISOString(),
+      lastStatus: classified.sourceStatus,
+      lastError: classified.message,
+      failureCount
     });
 
     await saveRunLog({
@@ -747,7 +788,10 @@ async function runRssPipeline() {
       id: doc.id,
       ...doc.data()
     }))
-    .filter((source) => source.active !== false)
+    .filter(
+      (source) =>
+        source.active === true && source.sourceStatus === "active"
+    )
     .slice(0, maxSources);
 
   const aiState = {
@@ -781,6 +825,10 @@ async function runRssPipeline() {
       totalDuplicates += result.duplicateCount || 0;
     } catch (error) {
       failedSources += 1;
+
+      console.error(
+        `[RSS] run-all continuing after failure: ${getSourceName(source)}; ${error.message}`
+      );
 
       results.push({
         sourceId: source.id,

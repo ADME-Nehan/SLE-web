@@ -5,6 +5,9 @@ const {
   runRssPipeline,
   fetchOneSource
 } = require("../services/newsPipelineService");
+const { discoverRssFeeds } = require("../services/rssDiscoveryService");
+const { validateRssSource } = require("../services/rssService");
+const { requireAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -18,6 +21,32 @@ function guessNameFromUrl(url) {
     return "RSS Source";
   }
 }
+
+router.post("/discover", requireAdmin, async (req, res) => {
+  const websiteUrl = String(req.body.websiteUrl || "").trim();
+
+  try {
+    const result = await discoverRssFeeds(websiteUrl);
+
+    return res.json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    console.error(`[RSS discovery] route failed safely: ${error.message}`);
+
+    return res.json({
+      success: true,
+      result: {
+        websiteUrl,
+        foundCount: 0,
+        candidates: [],
+        message:
+          "No valid RSS/Atom feeds found. You can paste the RSS URL manually."
+      }
+    });
+  }
+});
 
 router.get("/", async (req, res) => {
   try {
@@ -45,15 +74,29 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const rssUrl = normalizeUrl(req.body.rssUrl || req.body.url);
+    const requestedRssUrl = String(req.body.rssUrl || req.body.url || "").trim();
     const websiteUrl = normalizeUrl(req.body.websiteUrl || "");
 
-    if (!rssUrl) {
+    if (!requestedRssUrl) {
       return res.status(400).json({
         success: false,
-        error: "Valid RSS URL is required"
+        error: "RSS URL is required."
       });
     }
+
+    let validation;
+
+    try {
+      validation = await validateRssSource(requestedRssUrl);
+    } catch (error) {
+      return res.status(422).json({
+        success: false,
+        error: error.message,
+        sourceStatus: error.sourceStatus || "failed"
+      });
+    }
+
+    const rssUrl = validation.rssUrl;
 
     const existing = await db
       .collection("sources")
@@ -68,6 +111,7 @@ router.post("/", async (req, res) => {
       });
     }
 
+    const active = req.body.active !== false;
     const payload = {
       name: cleanText(req.body.name) || guessNameFromUrl(rssUrl),
       rssUrl,
@@ -77,11 +121,14 @@ router.post("/", async (req, res) => {
       category: "Auto",
       autoCategory: true,
 
-      active: req.body.active !== false,
-      type: "rss",
+      active,
+      type: validation.type,
+      sourceStatus: active ? "active" : "disabled",
 
       lastFetchedAt: null,
-      lastStatus: "not_started",
+      lastStatus: "validated",
+      lastCheckedAt: validation.checkedAt,
+      failureCount: 0,
       lastItemCount: 0,
       lastAcceptedCount: 0,
       lastRejectedCount: 0,
@@ -114,6 +161,17 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   try {
+    const sourceRef = db.collection("sources").doc(req.params.id);
+    const sourceSnap = await sourceRef.get();
+
+    if (!sourceSnap.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Source not found"
+      });
+    }
+
+    const currentSource = sourceSnap.data();
     const update = {
       updatedAt: new Date().toISOString()
     };
@@ -122,18 +180,49 @@ router.put("/:id", async (req, res) => {
       update.name = cleanText(req.body.name);
     }
 
-    if (req.body.rssUrl !== undefined || req.body.url !== undefined) {
-      const rssUrl = normalizeUrl(req.body.rssUrl || req.body.url);
+    const rssUrlWasProvided =
+      req.body.rssUrl !== undefined || req.body.url !== undefined;
+    const shouldValidate =
+      rssUrlWasProvided ||
+      (req.body.active === true && currentSource.sourceStatus !== "active");
 
-      if (!rssUrl) {
-        return res.status(400).json({
+    if (shouldValidate) {
+      const requestedRssUrl = rssUrlWasProvided
+        ? req.body.rssUrl || req.body.url
+        : currentSource.rssUrl || currentSource.url;
+
+      try {
+        const validation = await validateRssSource(requestedRssUrl);
+        update.rssUrl = validation.rssUrl;
+        update.url = validation.rssUrl;
+        update.type = validation.type;
+        update.lastCheckedAt = validation.checkedAt;
+        update.lastStatus = "validated";
+        update.lastError = null;
+        update.failureCount = 0;
+        update.sourceStatus = req.body.active === false ? "disabled" : "active";
+      } catch (error) {
+        const failureCount = Number(currentSource.failureCount || 0) + 1;
+
+        await sourceRef.update({
+          active: false,
+          sourceStatus:
+            failureCount >= 3
+              ? "disabled"
+              : error.sourceStatus || "failed",
+          lastStatus: "validation_failed",
+          lastError: error.message,
+          lastCheckedAt: new Date().toISOString(),
+          failureCount,
+          updatedAt: new Date().toISOString()
+        });
+
+        return res.status(422).json({
           success: false,
-          error: "Valid RSS URL is required"
+          error: error.message,
+          sourceStatus: error.sourceStatus || "failed"
         });
       }
-
-      update.rssUrl = rssUrl;
-      update.url = rssUrl;
     }
 
     if (req.body.websiteUrl !== undefined) {
@@ -145,9 +234,16 @@ router.put("/:id", async (req, res) => {
 
     if (req.body.active !== undefined) {
       update.active = req.body.active === true;
+
+      if (req.body.active === false) {
+        update.sourceStatus = "disabled";
+        update.lastStatus = "disabled";
+      } else if (update.sourceStatus === undefined) {
+        update.sourceStatus = "active";
+      }
     }
 
-    await db.collection("sources").doc(req.params.id).update(update);
+    await sourceRef.update(update);
 
     res.json({
       success: true,
@@ -193,6 +289,13 @@ router.post("/:id/fetch", async (req, res) => {
       ...snap.data()
     };
 
+    if (source.active !== true || source.sourceStatus !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "Source is not active. Validate and enable it before fetching."
+      });
+    }
+
     const result = await fetchOneSource(source);
 
     res.json({
@@ -200,7 +303,13 @@ router.post("/:id/fetch", async (req, res) => {
       result
     });
   } catch (error) {
-    res.status(500).json({
+    const timedOut =
+      error.code === "RSS_TIMEOUT" ||
+      error.code === "ECONNABORTED" ||
+      error.code === "ETIMEDOUT" ||
+      /timed?\s*out|timeout/i.test(error.message || "");
+
+    res.status(timedOut ? 504 : 500).json({
       success: false,
       error: error.message
     });

@@ -6,7 +6,7 @@ const API_BASE = (
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 8000,
+  timeout: 30000,
   headers: {
     "Content-Type": "application/json"
   }
@@ -74,6 +74,9 @@ export const updateArticlePriority = (id, data) =>
 export const getSources = () => api.get("/sources");
 
 export const addSource = (data) => api.post("/sources", data);
+
+export const discoverRssFeeds = (data, config = {}) =>
+  api.post("/sources/discover", data, config);
 
 export const updateSource = (id, data) => api.put(`/sources/${id}`, data);
 

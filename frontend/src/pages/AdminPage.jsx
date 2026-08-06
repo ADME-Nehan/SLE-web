@@ -5,6 +5,7 @@ import SourceCard from "../components/SourceCard";
 import {
   addSource,
   deleteSource,
+  discoverRssFeeds,
   fetchOneSource,
   getApiError,
   getDashboardStats,
@@ -27,6 +28,9 @@ export default function AdminPage() {
   const [busyId, setBusyId] = useState("");
   const [globalBusy, setGlobalBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryCandidates, setDiscoveryCandidates] = useState([]);
+  const [discoveredWebsiteUrl, setDiscoveredWebsiteUrl] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -97,6 +101,62 @@ export default function AdminPage() {
     }));
   }
 
+  async function handleDiscoverFeeds() {
+    const websiteUrl = form.websiteUrl.trim();
+
+    if (!websiteUrl) {
+      setMessage("Website URL is required");
+      return;
+    }
+
+    setMessage("");
+    setDiscoveryCandidates([]);
+    setDiscoveryLoading(true);
+
+    const controller = new AbortController();
+    const discoveryTimer = window.setTimeout(() => {
+      controller.abort();
+    }, 12000);
+
+    try {
+      const res = await discoverRssFeeds(
+        { websiteUrl },
+        { signal: controller.signal }
+      );
+      const result = res.data.result || {};
+      const candidates = result.candidates || [];
+
+      setDiscoveryCandidates(candidates);
+      setDiscoveredWebsiteUrl(result.websiteUrl || websiteUrl);
+      setMessage(
+        result.message ||
+          `${candidates.length} valid RSS/Atom feed${
+            candidates.length === 1 ? "" : "s"
+          } found.`
+      );
+    } catch (err) {
+      if (err?.code === "ERR_CANCELED") {
+        setMessage(
+          "No valid RSS/Atom feeds found. You can paste the RSS URL manually."
+        );
+      } else if (!handleAuthError(err)) {
+        setMessage(getApiError(err));
+      }
+    } finally {
+      window.clearTimeout(discoveryTimer);
+      setDiscoveryLoading(false);
+    }
+  }
+
+  function handleUseDiscoveredFeed(candidate) {
+    setForm((prev) => ({
+      ...prev,
+      rssUrl: candidate.url,
+      websiteUrl: discoveredWebsiteUrl || prev.websiteUrl
+    }));
+    setMessage("RSS feed selected. Now click Add Source and Fetch.");
+  }
+
   function handleLogout() {
     removeAdminToken();
 
@@ -161,6 +221,8 @@ export default function AdminPage() {
         websiteUrl: "",
         active: true
       });
+      setDiscoveryCandidates([]);
+      setDiscoveredWebsiteUrl("");
 
       if (newSource?.id) {
         setMessage("RSS source added. Backend is checking articles now...");
@@ -180,7 +242,12 @@ export default function AdminPage() {
       }
     } catch (err) {
       if (!handleAuthError(err)) {
-        setMessage(getApiError(err));
+        const errorMessage = getApiError(err);
+        setMessage(
+          err?.response?.status === 422
+            ? `Invalid RSS: ${errorMessage}`
+            : errorMessage
+        );
       }
     } finally {
       setGlobalBusy(false);
@@ -234,9 +301,18 @@ export default function AdminPage() {
     setBusyId(source.id);
 
     try {
+      const shouldEnable =
+        source.active !== true || source.sourceStatus !== "active";
+
       await updateSource(source.id, {
-        active: source.active === false
+        active: shouldEnable
       });
+
+      setMessage(
+        shouldEnable
+          ? "RSS source validated and enabled."
+          : "RSS source disabled."
+      );
 
       await loadAll();
     } catch (err) {
@@ -465,11 +541,83 @@ export default function AdminPage() {
           <section className="panel">
             <h2>Add RSS Source</h2>
             <p className="muted">
-              Paste the RSS feed URL. Category is auto-detected from each news
-              article by the backend.
+              Discover feeds from a news website or paste a feed URL manually.
+              Article categories are detected automatically by the backend.
             </p>
 
             <form className="form-grid" onSubmit={handleAddSource}>
+              <div className="rss-discovery-box">
+                <div className="rss-discovery-heading">
+                  <div>
+                    <span>Option A</span>
+                    <h3>Discover from Website URL</h3>
+                    <p>
+                      Enter a normal news website. The backend will locate and
+                      validate its available RSS or Atom feeds.
+                    </p>
+                  </div>
+                </div>
+
+                <label>
+                  Website URL
+                  <div className="rss-discovery-controls">
+                    <input
+                      value={form.websiteUrl}
+                      onChange={(e) => {
+                        updateForm("websiteUrl", e.target.value);
+                        setDiscoveryCandidates([]);
+                      }}
+                      placeholder="https://www.bbc.com/news/business"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleDiscoverFeeds}
+                      disabled={discoveryLoading || globalBusy}
+                    >
+                      {discoveryLoading
+                        ? "Discovering feeds..."
+                        : "Discover RSS Feeds"}
+                    </button>
+                  </div>
+                </label>
+
+                {discoveryCandidates.length > 0 ? (
+                  <div className="rss-candidate-list">
+                    {discoveryCandidates.map((candidate) => (
+                      <article className="rss-candidate-card" key={candidate.url}>
+                        <div className="rss-candidate-content">
+                          <strong>{candidate.title || "RSS Feed"}</strong>
+                          <span className="rss-candidate-url">
+                            {candidate.url}
+                          </span>
+                          <div className="rss-candidate-meta">
+                            <span>{candidate.type}</span>
+                            <span>
+                              {candidate.source === "html_link"
+                                ? "Found in website HTML"
+                                : "Found at common feed path"}
+                            </span>
+                            <span>Validated</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleUseDiscoveredFeed(candidate)}
+                        >
+                          Use This Feed
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rss-form-divider">
+                <span>Option B · Manual RSS URL</span>
+              </div>
+
               <label>
                 Source Name
                 <input
@@ -487,15 +635,9 @@ export default function AdminPage() {
                   onChange={(e) => updateForm("rssUrl", e.target.value)}
                   placeholder="https://feeds.bbci.co.uk/news/business/rss.xml"
                 />
-              </label>
-
-              <label>
-                Website URL
-                <input
-                  value={form.websiteUrl}
-                  onChange={(e) => updateForm("websiteUrl", e.target.value)}
-                  placeholder="https://www.bbc.com/news/business"
-                />
+                <small className="rss-url-help">
+                  Use a direct RSS XML feed URL, not a normal website page URL.
+                </small>
               </label>
 
               <div className="auto-category-box">
